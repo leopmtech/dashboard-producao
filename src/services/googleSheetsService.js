@@ -1,5 +1,5 @@
 // ==========================================
-// src/services/googleSheetsService.js - VERSÃO ORDENS DE SERVIÇO
+// src/services/googleSheetsService.js - VERSÃO ORDENS DE SERVIÇO (REVISADA)
 // ==========================================
 
 class GoogleSheetsService {
@@ -7,96 +7,128 @@ class GoogleSheetsService {
     this.baseUrl = 'https://sheets.googleapis.com/v4/spreadsheets';
     this.sheetsId = process.env.REACT_APP_GOOGLE_SHEETS_ID;
     this.apiKey = process.env.REACT_APP_GOOGLE_API_KEY;
+
     this.cache = new Map();
     this.cacheTimeout = 5 * 60 * 1000; // 5 minutos
+
+    // aba padrão usada hoje
     this.sheetName = 'in';
   }
 
-  // Verificar credenciais
+  // ---------------------------
+  // Credenciais
+  // ---------------------------
   checkCredentials() {
     const hasId = !!this.sheetsId && this.sheetsId !== 'SUA_PLANILHA_ID_AQUI';
     const hasKey = !!this.apiKey && this.apiKey !== 'SUA_API_KEY_AQUI';
-    
-    console.log('🔑 Verificando credenciais:', {
-      sheetsId: hasId ? '✅' : '❌',
-      apiKey: hasKey ? '✅' : '❌'
-    });
-    
+
+    if (!hasId || !hasKey) {
+      console.warn('🔒 Credenciais ausentes/inválidas', {
+        sheetsId: hasId ? 'ok' : 'faltando',
+        apiKey: hasKey ? 'ok' : 'faltando',
+      });
+    }
+
     return hasId && hasKey;
   }
 
-  // Buscar dados da aba "in" (VERSÃO CORRIGIDA FINAL)
+  // ---------------------------
+  // Helpers HTTP
+  // ---------------------------
+  async fetchRange(sheetName, range = 'A:Z') {
+    if (!this.checkCredentials()) {
+      throw new Error('Credenciais não configuradas');
+    }
+
+    // Formato oficial da API:
+    // GET /v4/spreadsheets/{spreadsheetId}/values/{range}?key=API_KEY
+    // onde range = "'Aba'!A:Z" (aspas simples necessárias se houver espaços)
+    const safeSheet = sheetName.includes(' ') || sheetName.includes("'")
+      ? `'${sheetName.replace(/'/g, "''")}'`
+      : sheetName;
+
+    const url = `${this.baseUrl}/${this.sheetsId}/values/${safeSheet}!${range}?key=${this.apiKey}`;
+
+    const res = await fetch(url);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    const json = await res.json();
+    return json.values || [];
+  }
+
+  // ---------------------------
+  // Ler aba "in" com cache
+  // ---------------------------
   async getInSheetData() {
     const cacheKey = 'in_sheet_raw_data';
-    
+    const now = Date.now();
+
     if (this.cache.has(cacheKey)) {
       const cached = this.cache.get(cacheKey);
-      if (Date.now() - cached.timestamp < this.cacheTimeout) {
+      if (now - cached.timestamp < this.cacheTimeout) {
         console.log('📦 Usando cache da aba "in"');
         return cached.data;
       }
     }
+
     try {
-      // Lista de URLs para testar diferentes formatos
-      const testUrls = [
-        `${this.baseUrl}/${this.sheetsId}/values/'in'!A:Z?key=${this.apiKey}`,          // Com aspas simples
-        `${this.baseUrl}/${this.sheetsId}/values/"in"!A:Z?key=${this.apiKey}`,         // Com aspas duplas
-        `${this.baseUrl}/${this.sheetsId}/values/${encodeURIComponent('in')}!A:Z?key=${this.apiKey}`, // Encoded
-        `${this.baseUrl}/${this.sheetsId}/values/in!A:Z?key=${this.apiKey}`,           // Sem aspas (original)
-      ];
+      console.log('📊 Carregando dados da aba "in"...');
+      const rawData = await this.fetchRange(this.sheetName, 'A:Z');
 
-      console.log('📊 Tentando carregar aba "in" com diferentes formatos...');
-
-      let lastError;
-      
-      for (let i = 0; i < testUrls.length; i++) {
-        const url = testUrls[i];
-        const formatNames = ['aspas simples', 'aspas duplas', 'encoded', 'sem aspas'];
-        
-        console.log(`🧪 Teste ${i + 1}/4 (${formatNames[i]}):`, url);
-        
-        try {
-          const response = await fetch(url);
-          
-          if (response.ok) {
-            const result = await response.json();
-            const rawData = result.values || [];
-            
-            console.log(`✅ SUCESSO com ${formatNames[i]}! ${rawData.length} linhas carregadas`);
-            
-            if (rawData.length > 0) {
-              console.log('📋 Headers encontrados:', rawData[0]);
-            }
-            
-            // Salvar no cache
-            this.cache.set(cacheKey, {
-              data: rawData,
-              timestamp: Date.now()
-            });
-            
-            return rawData;
-          } else {
-            const errorText = await response.text();
-            console.warn(`⚠️ ${formatNames[i]} falhou (${response.status}):`, errorText);
-            lastError = new Error(`HTTP ${response.status}: ${errorText}`);
-          }
-        } catch (error) {
-          console.warn(`⚠️ Erro com ${formatNames[i]}:`, error.message);
-          lastError = error;
-        }
+      if (Array.isArray(rawData) && rawData.length > 0) {
+        console.log(`✅ "in" carregada (${rawData.length} linhas). Headers:`, rawData[0]);
+      } else {
+        console.warn('⚠️ "in" sem linhas retornadas.');
       }
 
-      // Se chegou aqui, todos os formatos falharam
-      console.error('❌ Todos os formatos falharam!');
-      throw lastError || new Error('Falha ao carregar aba "in" com todos os formatos testados');
-      
-    } catch (error) {
-      console.error('❌ Erro geral ao carregar aba "in":', error);
-      throw error;
+      this.cache.set(cacheKey, { data: rawData, timestamp: now });
+      return rawData;
+    } catch (err) {
+      console.error('❌ Falha ao carregar aba "in":', err);
+      throw err;
     }
   }
 
-  // Processar dados de ordens de serviço
+  // ---------------------------
+  // Tipos únicos de "Tipo de demanda"
+  // ---------------------------
+  async getUniqueDemandTypes({ sheetName = this.sheetName, range = 'A:Z', columnName = 'Tipo de demanda' } = {}) {
+    try {
+      const raw = sheetName === this.sheetName ? await this.getInSheetData() : await this.fetchRange(sheetName, range);
+      if (!raw || raw.length < 2) return [];
+
+      // Descobre índice da coluna (case-insensitive)
+      const headers = raw[0] || [];
+      const normalize = (s) => (s || '').toString().trim().toLowerCase();
+      const idx = headers.findIndex((h) => normalize(h) === normalize(columnName));
+
+      if (idx === -1) {
+        console.warn(`⚠️ Coluna "${columnName}" não encontrada em "${sheetName}".`, headers);
+        return [];
+      }
+
+      const set = new Set();
+      for (const row of raw.slice(1)) {
+        const v = row[idx];
+        if (!v) continue;
+        const val = v.toString().trim();
+        if (val) set.add(val);
+      }
+
+      const result = Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+      console.log(`🏷️ ${result.length} tipos únicos de "${columnName}" encontrados.`);
+      return result;
+    } catch (e) {
+      console.error('❌ Erro ao obter tipos únicos de demanda:', e);
+      return [];
+    }
+  }
+
+  // ---------------------------
+  // Processamento da planilha de OS
+  // ---------------------------
   processServiceOrderData(rawData) {
     if (!rawData || rawData.length < 2) {
       console.warn('⚠️ Dados insuficientes');
@@ -104,58 +136,63 @@ class GoogleSheetsService {
     }
 
     try {
-      const headers = rawData[0];
+      const headers = rawData[0].map((h) => (h || '').toString().trim());
       const orders = [];
-      
-      // Mapear índices das colunas
+
+      const norm = (s) => (s || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+      // Mapeamento tolerante
       const columnMap = {};
       headers.forEach((header, index) => {
-        const normalizedHeader = header.toLowerCase().trim();
-        if (normalizedHeader.includes('concluído')) columnMap.concluido = index;
-        if (normalizedHeader.includes('ordem de serviço')) columnMap.ordemServico = index;
-        if (normalizedHeader.includes('cliente1')) columnMap.cliente1 = index;
-        if (normalizedHeader.includes('cliente2')) columnMap.cliente2 = index;
-        if (normalizedHeader.includes('tipo de demanda')) columnMap.tipoDemanda = index;
-        if (normalizedHeader.includes('criado por')) columnMap.criadoPor = index;
-        if (normalizedHeader.includes('data de início')) columnMap.dataInicio = index;
-        if (normalizedHeader.includes('data de entrega')) columnMap.dataEntrega = index;
-        if (normalizedHeader.includes('quem executa')) columnMap.quemExecuta = index;
-        if (normalizedHeader.includes('status')) columnMap.status = index;
-        if (normalizedHeader.includes('complexidade')) columnMap.complexidade = index;
-        if (normalizedHeader.includes('prioridade')) columnMap.prioridade = index;
+        const h = norm(header);
+        if (h.includes('conclu')) columnMap.concluido = index; // concluído/concluida
+        if (h.includes('ordem') && h.includes('serv')) columnMap.ordemServico = index;
+        if (h.includes('cliente1') || h === 'cliente' || h.includes('cliente 1')) columnMap.cliente1 = index;
+        if (h.includes('cliente2') || h.includes('cliente 2')) columnMap.cliente2 = index;
+        if (h.includes('tipo') && h.includes('demanda')) columnMap.tipoDemanda = index;
+        if (h.includes('criado por') || h.includes('criador')) columnMap.criadoPor = index;
+        if (h.includes('data') && (h.includes('inicio') || h.includes('início'))) columnMap.dataInicio = index;
+        if (h.includes('data') && (h.includes('entrega') || h.includes('prazo'))) columnMap.dataEntrega = index;
+        if (h.includes('quem executa') || h.includes('responsavel') || h.includes('responsável')) columnMap.quemExecuta = index;
+        if (h.includes('status')) columnMap.status = index;
+        if (h.includes('complexidade')) columnMap.complexidade = index;
+        if (h.includes('prioridade')) columnMap.prioridade = index;
       });
 
-      console.log('📋 Mapeamento de colunas:', columnMap);
-
-      // Processar cada linha
+      // Processa linhas
       for (let i = 1; i < rawData.length; i++) {
         const row = rawData[i];
-        if (!row[columnMap.ordemServico] && !row[columnMap.cliente1]) continue;
+        const hasOsOrClient = (columnMap.ordemServico != null && row[columnMap.ordemServico]) ||
+                              (columnMap.cliente1 != null && row[columnMap.cliente1]);
+        if (!hasOsOrClient) continue;
+
+        const concluidoRaw = columnMap.concluido != null ? (row[columnMap.concluido] || '').toString().trim() : '';
+        const concluidoNorm = norm(concluidoRaw);
+        const isConcluido =
+          ['sim', 'yes', 'true', '1', 'concluido', 'concluida', 'ok', 'feito'].some((k) => concluidoNorm.includes(k));
 
         const order = {
           id: i,
-          concluido: row[columnMap.concluido] || '',
-          ordemServico: row[columnMap.ordemServico] || '',
-          cliente1: row[columnMap.cliente1] || '',
-          cliente2: row[columnMap.cliente2] || '',
-          tipoDemanda: row[columnMap.tipoDemanda] || '',
-          criadoPor: row[columnMap.criadoPor] || '',
-          dataInicio: row[columnMap.dataInicio] || '',
-          dataEntrega: row[columnMap.dataEntrega] || '',
-          quemExecuta: row[columnMap.quemExecuta] || '',
-          status: row[columnMap.status] || '',
-          complexidade: row[columnMap.complexidade] || '',
-          prioridade: row[columnMap.prioridade] || '',
-          
-          // Campos processados
-          isConcluido: (row[columnMap.concluido] || '').toLowerCase() === 'yes',
-          isRelatorio: (row[columnMap.tipoDemanda] || '').toLowerCase().includes('relatório') || 
-                      (row[columnMap.tipoDemanda] || '').toLowerCase().includes('relatorio'),
-          dataEntregaDate: this.parseDate(row[columnMap.dataEntrega]),
-          dataInicioDate: this.parseDate(row[columnMap.dataInicio])
+          concluido: concluidoRaw,
+          ordemServico: columnMap.ordemServico != null ? (row[columnMap.ordemServico] || '') : '',
+          cliente1: columnMap.cliente1 != null ? (row[columnMap.cliente1] || '') : '',
+          cliente2: columnMap.cliente2 != null ? (row[columnMap.cliente2] || '') : '',
+          tipoDemanda: columnMap.tipoDemanda != null ? (row[columnMap.tipoDemanda] || '') : '',
+          criadoPor: columnMap.criadoPor != null ? (row[columnMap.criadoPor] || '') : '',
+          dataInicio: columnMap.dataInicio != null ? (row[columnMap.dataInicio] || '') : '',
+          dataEntrega: columnMap.dataEntrega != null ? (row[columnMap.dataEntrega] || '') : '',
+          quemExecuta: columnMap.quemExecuta != null ? (row[columnMap.quemExecuta] || '') : '',
+          status: columnMap.status != null ? (row[columnMap.status] || '') : '',
+          complexidade: columnMap.complexidade != null ? (row[columnMap.complexidade] || '') : '',
+          prioridade: columnMap.prioridade != null ? (row[columnMap.prioridade] || '') : '',
+
+          // Derivados
+          isConcluido,
+          isRelatorio: norm(columnMap.tipoDemanda != null ? row[columnMap.tipoDemanda] : '').includes('relatorio'),
+          dataEntregaDate: this.parseDate(columnMap.dataEntrega != null ? row[columnMap.dataEntrega] : ''),
+          dataInicioDate: this.parseDate(columnMap.dataInicio != null ? row[columnMap.dataInicio] : ''),
         };
 
-        // Verificar se está em atraso
         if (order.dataEntregaDate) {
           const hoje = new Date();
           hoje.setHours(0, 0, 0, 0);
@@ -165,72 +202,68 @@ class GoogleSheetsService {
         orders.push(order);
       }
 
-      // Calcular métricas
       const summary = this.calculateMetrics(orders);
-
       console.log(`✅ Processadas ${orders.length} ordens de serviço`);
-      console.log('📊 Resumo:', summary);
-
       return { orders, summary };
-
     } catch (error) {
       console.error('❌ Erro ao processar dados:', error);
       return { orders: [], summary: {} };
     }
   }
 
-  // Função auxiliar para parsear datas
-  parseDate(dateString) {
-    if (!dateString) return null;
-    
-    // Tentar diferentes formatos de data
-    const formats = [
-      /(\d{1,2})\/(\d{1,2})\/(\d{4})/,  // DD/MM/YYYY ou MM/DD/YYYY
-      /(\d{4})-(\d{1,2})-(\d{1,2})/,   // YYYY-MM-DD
-    ];
+  // ---------------------------
+  // Datas (serial, YYYY-MM-DD, DD/MM/YYYY)
+  // ---------------------------
+  parseDate(value) {
+    if (value == null || value === '') return null;
 
-    for (const format of formats) {
-      const match = dateString.match(format);
-      if (match) {
-        // Assumir formato DD/MM/YYYY para o primeiro padrão
-        if (format === formats[0]) {
-          const [, day, month, year] = match;
-          return new Date(year, month - 1, day);
-        } else {
-          const [, year, month, day] = match;
-          return new Date(year, month - 1, day);
-        }
-      }
+    // número serial (Google/Excel)
+    if (!isNaN(value) && typeof value !== 'string') {
+      const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+      const ms = Number(value) * 24 * 60 * 60 * 1000;
+      return new Date(excelEpoch.getTime() + ms);
     }
 
-    return null;
+    const s = String(value).trim();
+
+    // YYYY-MM-DD
+    const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
+    let m = s.match(iso);
+    if (m) {
+      const [, y, mo, d] = m;
+      return new Date(Number(y), Number(mo) - 1, Number(d));
+    }
+
+    // DD/MM/YYYY
+    const br = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+    m = s.match(br);
+    if (m) {
+      const [, d, mo, y] = m;
+      return new Date(Number(y), Number(mo) - 1, Number(d));
+    }
+
+    // tenta Date nativo
+    const t = new Date(s);
+    return isNaN(t.getTime()) ? null : t;
   }
 
-  // Calcular métricas
+  // ---------------------------
+  // Métricas
+  // ---------------------------
   calculateMetrics(orders) {
     const totalDemandas = orders.length;
-    const totalRelatorios = orders.filter(o => o.isRelatorio).length;
-    const relatoriosPendentes = orders.filter(o => o.isRelatorio && !o.isConcluido).length;
-    const relatoriosAtrasados = orders.filter(o => o.isAtrasado).length;
-    const totalConcluidos = orders.filter(o => o.isConcluido).length;
-    
-    const taxaConclusao = totalDemandas > 0 ? (totalConcluidos / totalDemandas * 100) : 0;
+    const totalRelatorios = orders.filter((o) => o.isRelatorio).length;
+    const relatoriosPendentes = orders.filter((o) => o.isRelatorio && !o.isConcluido).length;
+    const relatoriosAtrasados = orders.filter((o) => o.isAtrasado).length;
+    const totalConcluidos = orders.filter((o) => o.isConcluido).length;
 
-    // Clientes únicos
-    const clientesUnicos = [...new Set(orders
-      .map(o => o.cliente1)
-      .filter(c => c && c.trim())
-    )];
+    const taxaConclusao = totalDemandas > 0 ? (totalConcluidos / totalDemandas) * 100 : 0;
 
-    // Tipos de demanda únicos
-    const tiposDemanda = [...new Set(orders
-      .map(o => o.tipoDemanda)
-      .filter(t => t && t.trim())
-    )];
+    const clientesUnicos = [...new Set(orders.map((o) => o.cliente1).filter((c) => (c || '').trim()))];
+    const tiposDemanda = [...new Set(orders.map((o) => o.tipoDemanda).filter((t) => (t || '').trim()))];
 
-    // Separar por ano baseado na data de entrega
-    const orders2024 = orders.filter(o => o.dataEntregaDate && o.dataEntregaDate.getFullYear() === 2024);
-    const orders2025 = orders.filter(o => o.dataEntregaDate && o.dataEntregaDate.getFullYear() === 2025);
+    const orders2024 = orders.filter((o) => o.dataEntregaDate && o.dataEntregaDate.getFullYear() === 2024);
+    const orders2025 = orders.filter((o) => o.dataEntregaDate && o.dataEntregaDate.getFullYear() === 2025);
 
     return {
       totalDemandas,
@@ -244,93 +277,92 @@ class GoogleSheetsService {
       totalClientes: clientesUnicos.length,
       orders2024: orders2024.length,
       orders2025: orders2025.length,
-      crescimentoPercentual: orders2024.length > 0 ? 
-        Math.round(((orders2025.length - orders2024.length) / orders2024.length) * 10000) / 100 : 0
+      crescimentoPercentual:
+        orders2024.length > 0
+          ? Math.round(((orders2025.length - orders2024.length) / orders2024.length) * 10000) / 100
+          : 0,
     };
   }
 
-  // Extrair tipos únicos de demanda
+  // ---------------------------
+  // Tipos únicos para o dashboard (com id/label/value)
+  // ---------------------------
   extractUniqueContentTypes(orders) {
-    const uniqueTypes = [...new Set(orders
-      .map(order => order.tipoDemanda)
-      .filter(tipo => tipo && tipo.trim() !== '')
-      .map(tipo => tipo.trim())
-    )].sort();
+    const uniqueTypes = [...new Set(
+      orders
+        .map((o) => (o.tipoDemanda || '').toString().trim())
+        .filter(Boolean)
+    )].sort((a, b) => a.localeCompare(b, 'pt-BR'));
 
     console.log('🏷️ Tipos únicos extraídos da coluna "Tipo de demanda":', uniqueTypes);
-    
-    return uniqueTypes.map(tipo => ({
-      id: tipo.toLowerCase().replace(/\s+/g, '_'), // ID para filtros
-      label: tipo,                                  // Texto para exibir
-      value: tipo                                   // Valor original
+
+    return uniqueTypes.map((tipo) => ({
+      id: tipo.toLowerCase().replace(/\s+/g, '_'),
+      label: tipo,
+      value: tipo,
     }));
   }
 
-  // Converter para formato esperado pelo dashboard
-  convertToClientsFormat(orders, summary) {
-    // Criar "clientes" fictícios baseados nos dados reais
+  // ---------------------------
+  // Formato por cliente (compatível com seu dashboard)
+  // ---------------------------
+  convertToClientsFormat(orders) {
     const clienteStats = {};
+    const monthNames = [
+      'janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho',
+      'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
+    ];
 
-    // Agrupar por cliente
-    orders.forEach(order => {
-      const cliente = order.cliente1;
-      if (!cliente || !cliente.trim()) return;
+    orders.forEach((order) => {
+      const cliente = (order.cliente1 || '').toString().trim();
+      if (!cliente) return;
 
       if (!clienteStats[cliente]) {
         clienteStats[cliente] = {
-          cliente: cliente,
+          cliente,
           total: 0,
           concluidos: 0,
           pendentes: 0,
           atrasados: 0,
           2024: 0,
           2025: 0,
-          janeiro: 0, fevereiro: 0, marco: 0, abril: 0,
-          maio: 0, junho: 0, julho: 0, agosto: 0,
-          setembro: 0, outubro: 0, novembro: 0, dezembro: 0
+          janeiro: 0, fevereiro: 0, marco: 0, abril: 0, maio: 0, junho: 0,
+          julho: 0, agosto: 0, setembro: 0, outubro: 0, novembro: 0, dezembro: 0,
         };
       }
 
       const stats = clienteStats[cliente];
-      stats.total++;
-      
-      if (order.isConcluido) stats.concluidos++;
-      else stats.pendentes++;
-      
-      if (order.isAtrasado) stats.atrasados++;
+      stats.total += 1;
+      if (order.isConcluido) stats.concluidos += 1; else stats.pendentes += 1;
+      if (order.isAtrasado) stats.atrasados += 1;
 
-      // Distribuir por ano
       if (order.dataEntregaDate) {
-        const year = order.dataEntregaDate.getFullYear();
-        if (year === 2024) stats['2024']++;
-        if (year === 2025) stats['2025']++;
+        const y = order.dataEntregaDate.getFullYear();
+        if (y === 2024) stats['2024'] += 1;
+        if (y === 2025) stats['2025'] += 1;
 
-        // Distribuir por mês (baseado na data de entrega)
-        const month = order.dataEntregaDate.getMonth();
-        const monthNames = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho',
-                           'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
-        if (monthNames[month]) {
-          stats[monthNames[month]]++;
-        }
+        const m = order.dataEntregaDate.getMonth();
+        const key = monthNames[m];
+        if (key) stats[key] += 1;
       }
     });
 
     return Object.values(clienteStats);
   }
 
-  // Carregar dados do dashboard
+  // ---------------------------
+  // Carregar dados do dashboard (com cache)
+  // ---------------------------
   async getDashboardData(useCache = true) {
     console.log('📊 Carregando dashboard de ordens de serviço...');
-    
-    if (!this.checkCredentials()) {
-      throw new Error('Credenciais não configuradas');
-    }
+    if (!this.checkCredentials()) throw new Error('Credenciais não configuradas');
 
     const cacheKey = 'dashboard_service_orders';
-    
+    const now = Date.now();
+
     if (useCache && this.cache.has(cacheKey)) {
       const cached = this.cache.get(cacheKey);
-      if (Date.now() - cached.timestamp < this.cacheTimeout) {
+      if (now - cached.timestamp < this.cacheTimeout) {
         console.log('📦 Usando cache do dashboard');
         return cached.data;
       }
@@ -339,87 +371,69 @@ class GoogleSheetsService {
     try {
       const rawData = await this.getInSheetData();
       const { orders, summary } = this.processServiceOrderData(rawData);
-      const clientsData = this.convertToClientsFormat(orders, summary);
-
-      // Extrair tipos únicos de conteúdo
+      const clientsData = this.convertToClientsFormat(orders);
       const uniqueContentTypes = this.extractUniqueContentTypes(orders);
 
       const dashboardData = {
         totalSheets: 1,
         loadedAt: new Date().toISOString(),
-        sheetName: 'in',
-        
-        // Dados originais para referência
+        sheetName: this.sheetName,
+
         originalOrders: orders,
         metrics: summary,
-        contentTypes: uniqueContentTypes, // tipos extraídos da planilha
-        
-        // Formato esperado pelo dashboard (todas as categorias usam os mesmos dados)
+        contentTypes: uniqueContentTypes,
+
         visaoGeral: clientsData,
-        visaoGeral2024: clientsData.filter(c => c['2024'] > 0),
+        visaoGeral2024: clientsData.filter((c) => c['2024'] > 0),
         diarios: clientsData,
-        diarios2024: clientsData.filter(c => c['2024'] > 0),
+        diarios2024: clientsData.filter((c) => c['2024'] > 0),
         semanais: clientsData,
-        semanais2024: clientsData.filter(c => c['2024'] > 0),
+        semanais2024: clientsData.filter((c) => c['2024'] > 0),
         mensais: clientsData,
-        mensais2024: clientsData.filter(c => c['2024'] > 0),
+        mensais2024: clientsData.filter((c) => c['2024'] > 0),
         especiais: clientsData,
-        especiais2024: clientsData.filter(c => c['2024'] > 0),
+        especiais2024: clientsData.filter((c) => c['2024'] > 0),
         diagnosticos: clientsData,
-        diagnosticos2024: clientsData.filter(c => c['2024'] > 0),
-        design: clientsData
+        diagnosticos2024: clientsData.filter((c) => c['2024'] > 0),
+        design: clientsData,
       };
 
-      console.log('🎉 DASHBOARD CARREGADO:', {
-        totalOrdens: orders.length,
-        totalClientes: summary.totalClientes,
-        tiposDemanda: summary.tiposDemanda,
-        metricas: {
-          totalRelatorios: summary.totalRelatorios,
-          pendentes: summary.relatoriosPendentes,
-          atrasados: summary.relatoriosAtrasados,
-          taxaConclusao: summary.taxaConclusao
-        }
-      });
-
-      this.cache.set(cacheKey, {
-        data: dashboardData,
-        timestamp: Date.now()
+      this.cache.set(cacheKey, { data: dashboardData, timestamp: now });
+      console.log('🎉 Dashboard montado:', {
+        ordens: orders.length,
+        clientes: summary.totalClientes,
+        tipos: summary.tiposDemanda?.length || 0,
       });
 
       return dashboardData;
-
     } catch (error) {
       console.error('❌ Erro ao carregar dashboard:', error);
       throw error;
     }
   }
 
-  // Limpar cache
+  // ---------------------------
+  // Utilidades
+  // ---------------------------
   clearCache() {
     console.log('🧹 Limpando cache');
     this.cache.clear();
   }
 
-  // Teste de conexão
   async testConnection() {
     try {
       const data = await this.getInSheetData();
       const { orders, summary } = this.processServiceOrderData(data);
-      
       return {
         success: true,
-        sheetName: 'in',
+        sheetName: this.sheetName,
         totalRows: data.length,
         totalOrders: orders.length,
         summary,
-        message: `✅ Conectado - ${orders.length} ordens de serviço processadas`
+        message: `✅ Conectado - ${orders.length} ordens de serviço processadas`,
       };
     } catch (error) {
-      return {
-        success: false,
-        error: error.message
-      };
+      return { success: false, error: error.message };
     }
   }
 }

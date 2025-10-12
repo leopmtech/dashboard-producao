@@ -1,12 +1,27 @@
+// ==========================================
+// src/components/RankingTable.jsx
+// Ranking com coluna extra "🧾 Demandas"
+// ==========================================
 import React from 'react';
 
-const RankingTable = ({ data, title, subtitle, dataKey = "media2025" }) => {
-  
-  console.log('📋 [RANKING TABLE] Dados recebidos:', {
-    data: data,
+const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = null }) => {
+  console.log('📋 [RANKING TABLE v2] Dados recebidos:', {
     length: data?.length || 0,
-    dataKey
+    dataKey,
+    orders: Array.isArray(orders) ? orders.length : '—'
   });
+
+  // Mapa Cliente -> nº de demandas a partir das ordens originais
+  const demandasPorCliente = React.useMemo(() => {
+    if (!orders || !Array.isArray(orders)) return null;
+    const map = {};
+    for (const o of orders) {
+      const nome = (o?.cliente1 || '').trim();
+      if (!nome) continue;
+      map[nome] = (map[nome] || 0) + 1;
+    }
+    return map;
+  }, [orders]);
 
   // Processar dados da planilha Google Sheets
   const processedData = React.useMemo(() => {
@@ -16,52 +31,49 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025" }) => {
     }
 
     const processed = data.map((item, index) => {
-      // Para período comparativo (ambos)
+      const clienteNome = item.cliente || `Cliente ${index + 1}`;
+      // Preferir contagem vinda das ordens; se não houver, usar total agregado como fallback
+      const demandas = (demandasPorCliente && demandasPorCliente[clienteNome]) ?? item.total ?? 0;
+
       if (dataKey === "media2025") {
         const media2025 = item.media2025 || (item.total ? Math.round((item.total / 5) * 10) / 10 : 0);
         const media2024 = item.media2024 || 0;
         const crescimento = media2024 > 0 ? Math.round(((media2025 - media2024) / media2024) * 100) : 0;
-        
+
         return {
           ranking: index + 1,
-          cliente: item.cliente || `Cliente ${index + 1}`,
-          media2024: media2024,
-          media2025: media2025,
-          crescimento: crescimento,
+          cliente: clienteNome,
+          media2024,
+          media2025,
+          crescimento,
           total2024: item.total2024 || 0,
           total2025: item.total2025 || item.total || 0,
+          demandas, // 👈 nova info
         };
-      } 
-      // Para período específico
-      else {
+      } else {
         const valor = item.total || item.valor || 0;
         const media = item.media || (valor > 0 ? Math.round((valor / 5) * 10) / 10 : 0);
-        
+
         return {
           ranking: index + 1,
-          cliente: item.cliente || `Cliente ${index + 1}`,
+          cliente: clienteNome,
           total: valor,
-          media: media,
-          valor: valor
+          media,
+          valor,
+          demandas, // 👈 nova info
         };
       }
     });
 
     // Ordenar por média 2025 ou total conforme o caso
     const sorted = processed
-      .filter(item => dataKey === "media2025" ? item.media2025 > 0 : item.total > 0)
-      .sort((a, b) => {
-        if (dataKey === "media2025") {
-          return b.media2025 - a.media2025;
-        } else {
-          return b.total - a.total;
-        }
-      })
-      .map((item, index) => ({ ...item, ranking: index + 1 }));
+      .filter(item => (dataKey === "media2025" ? item.media2025 > 0 : item.total > 0))
+      .sort((a, b) => (dataKey === "media2025" ? b.media2025 - a.media2025 : b.total - a.total))
+      .map((item, idx) => ({ ...item, ranking: idx + 1 }));
 
     console.log('📋 Dados processados para tabela:', sorted);
     return sorted;
-  }, [data, dataKey]);
+  }, [data, dataKey, demandasPorCliente]);
 
   // Função para determinar cor baseada no crescimento
   const getGrowthColor = (crescimento) => {
@@ -84,7 +96,6 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025" }) => {
       <div className="chart-container modern">
         <h3 className="chart-title">{title}</h3>
         {subtitle && <p className="chart-subtitle">{subtitle}</p>}
-        
         <div style={{
           height: '350px',
           display: 'flex',
@@ -111,8 +122,9 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025" }) => {
   return (
     <div className="chart-container modern">
       <h3 className="chart-title">{title}</h3>
-      {subtitle && <p className="chart-subtitle">{subtitle}</p>}
-      
+      {subtitle && <p className="chart-subtitle">{subtitle}</p>
+      }
+
       {/* Tabela de Ranking */}
       <div style={{
         overflowX: 'auto',
@@ -126,31 +138,28 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025" }) => {
           borderCollapse: 'collapse',
           fontSize: '0.9rem'
         }}>
-          <thead style={{
-            backgroundColor: '#FF6B47',
-            color: 'white'
-          }}>
+          <thead style={{ backgroundColor: '#FF6B47', color: 'white' }}>
             <tr>
-              <th style={{ padding: '16px 12px', textAlign: 'left', fontWeight: '600' }}>
-                🏆 Ranking
-              </th>
-              <th style={{ padding: '16px 12px', textAlign: 'left', fontWeight: '600' }}>
-                🏢 Cliente
-              </th>
+              <th style={{ padding: '16px 12px', textAlign: 'left', fontWeight: '600' }}>🏆 Ranking</th>
+              <th style={{ padding: '16px 12px', textAlign: 'left', fontWeight: '600' }}>🏢 Cliente</th>
+
               {dataKey === "media2025" ? (
                 <>
                   <th style={{ padding: '16px 12px', textAlign: 'center', fontWeight: '600' }}>
-                    📊 Média 2024<br/>
+                    📊 Média 2024<br />
                     <span style={{ fontSize: '0.75rem', opacity: '0.9' }}>(rel/mês)</span>
                   </th>
                   <th style={{ padding: '16px 12px', textAlign: 'center', fontWeight: '600' }}>
-                    📈 Média 2025<br/>
+                    📈 Média 2025<br />
                     <span style={{ fontSize: '0.75rem', opacity: '0.9' }}>(rel/mês)</span>
                   </th>
                   <th style={{ padding: '16px 12px', textAlign: 'center', fontWeight: '600' }}>
                     📈 Crescimento
                   </th>
-                 
+                  {/* NOVA COLUNA */}
+                  <th style={{ padding: '16px 12px', textAlign: 'center', fontWeight: '600' }}>
+                    🧾 Demandas
+                  </th>
                 </>
               ) : (
                 <>
@@ -160,19 +169,26 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025" }) => {
                   <th style={{ padding: '16px 12px', textAlign: 'center', fontWeight: '600' }}>
                     📈 Média/Mês
                   </th>
+                  {/* NOVA COLUNA */}
+                  <th style={{ padding: '16px 12px', textAlign: 'center', fontWeight: '600' }}>
+                    🧾 Demandas
+                  </th>
                 </>
               )}
             </tr>
           </thead>
+
           <tbody>
             {processedData.map((item, index) => (
-              <tr key={item.cliente} style={{
-                borderBottom: '1px solid #F1F5F9',
-                backgroundColor: index % 2 === 0 ? '#FAFBFC' : 'white',
-                transition: 'background-color 0.2s ease'
-              }}
-              onMouseEnter={(e) => e.target.parentElement.style.backgroundColor = '#F0F9FF'}
-              onMouseLeave={(e) => e.target.parentElement.style.backgroundColor = index % 2 === 0 ? '#FAFBFC' : 'white'}
+              <tr
+                key={`${item.cliente}-${index}`}
+                style={{
+                  borderBottom: '1px solid #F1F5F9',
+                  backgroundColor: index % 2 === 0 ? '#FAFBFC' : 'white',
+                  transition: 'background-color 0.2s ease'
+                }}
+                onMouseEnter={(e) => (e.target.parentElement.style.backgroundColor = '#F0F9FF')}
+                onMouseLeave={(e) => (e.target.parentElement.style.backgroundColor = index % 2 === 0 ? '#FAFBFC' : 'white')}
               >
                 <td style={{ padding: '12px', textAlign: 'center' }}>
                   <div style={{
@@ -190,9 +206,11 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025" }) => {
                     {item.ranking}
                   </div>
                 </td>
+
                 <td style={{ padding: '12px', fontWeight: '600', color: '#2C3E50' }}>
                   {item.cliente}
                 </td>
+
                 {dataKey === "media2025" ? (
                   <>
                     <td style={{ padding: '12px', textAlign: 'center', color: '#6B7280' }}>
@@ -214,7 +232,10 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025" }) => {
                         <span>{item.crescimento > 0 ? '+' : ''}{item.crescimento}%</span>
                       </div>
                     </td>
-                    
+                    {/* Célula de Demandas */}
+                    <td style={{ padding: '12px', textAlign: 'center', fontWeight: 600 }}>
+                      {Number(item.demandas || 0).toLocaleString('pt-BR')}
+                    </td>
                   </>
                 ) : (
                   <>
@@ -223,6 +244,10 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025" }) => {
                     </td>
                     <td style={{ padding: '12px', textAlign: 'center', color: '#6B7280' }}>
                       {item.media.toFixed(1)}
+                    </td>
+                    {/* Célula de Demandas */}
+                    <td style={{ padding: '12px', textAlign: 'center', fontWeight: 600 }}>
+                      {Number(item.demandas || 0).toLocaleString('pt-BR')}
                     </td>
                   </>
                 )}
