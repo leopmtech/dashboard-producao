@@ -237,13 +237,14 @@ function App() {
 <div className="kpis-grid modern">
   {filters.periodo === 'ambos' ? (
     <>
-      <KPICard
-        title="Clientes Analisados"
-        value={uniqueClients.length || 0}  {/* 🔧 CORRIGIDO - usa uniqueClients */}
-        subtitle={`${filters.cliente !== 'todos' ? 'Cliente: ' + filters.cliente : 'Todos os clientes únicos'}`}
-        gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-        delay="100ms"
-      />
+      // 🔧 CORRIGIDO - usa uniqueClients
+<KPICard
+  title="Clientes Analisados"
+  value={uniqueClients.length || 0}
+  subtitle={`${filters.cliente !== 'todos' ? 'Cliente: ' + filters.cliente : 'Todos os clientes únicos'}`}
+  gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+  delay="100ms"
+/>
       <KPICard
         title="Crescimento Médio"
         value={`${metrics.crescimento > 0 ? '+' : ''}${metrics.crescimento || 0}%`}
