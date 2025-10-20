@@ -276,13 +276,14 @@ function App() {
     </>
   ) : (
     <>
-      <KPICard
-        title="Clientes Filtrados"
-        value={filteredData?.visaoGeral?.length || 0}  {/* 🔧 CORRIGIDO - dados filtrados */}
-        subtitle={`Período: ${filters.periodo} • Tipo: ${filters.tipo}`}
-        gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-        delay="100ms"
-      />
+      {/* �� CORRIGIDO - dados filtrados */}
+<KPICard
+  title="Clientes Filtrados"
+  value={filteredData?.visaoGeral?.length || 0}
+  subtitle={`Período: ${filters.periodo} • Tipo: ${filters.tipo}`}
+  gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+  delay="100ms"
+/>
       <KPICard
         title="Total de Relatórios"
         value={metrics.totalRelatorios || 0}
