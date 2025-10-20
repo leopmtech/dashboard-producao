@@ -47,7 +47,14 @@ class GoogleSheetsService {
       ? `'${sheetName.replace(/'/g, "''")}'`
       : sheetName;
 
-    const url = `${this.baseUrl}/${this.sheetsId}/values/${safeSheet}!${range}?key=${this.apiKey}`;
+    // Força retorno "cru" (datas como números seriais)
+    const params = new URLSearchParams({
+      key: this.apiKey,
+      valueRenderOption: 'UNFORMATTED_VALUE',
+      dateTimeRenderOption: 'FORMATTED_STRING',
+    });
+
+    const url = `${this.baseUrl}/${this.sheetsId}/values/${safeSheet}!${range}?${params.toString()}`;
 
     const res = await fetch(url);
     if (!res.ok) {
@@ -162,8 +169,9 @@ class GoogleSheetsService {
       // Processa linhas
       for (let i = 1; i < rawData.length; i++) {
         const row = rawData[i];
-        const hasOsOrClient = (columnMap.ordemServico != null && row[columnMap.ordemServico]) ||
-                              (columnMap.cliente1 != null && row[columnMap.cliente1]);
+        const hasOsOrClient =
+          (columnMap.ordemServico != null && row[columnMap.ordemServico]) ||
+          (columnMap.cliente1 != null && row[columnMap.cliente1]);
         if (!hasOsOrClient) continue;
 
         const concluidoRaw = columnMap.concluido != null ? (row[columnMap.concluido] || '').toString().trim() : '';
@@ -219,9 +227,12 @@ class GoogleSheetsService {
 
     // número serial (Google/Excel)
     if (!isNaN(value) && typeof value !== 'string') {
+      // Epoch Excel 1899-12-30 → soma dias*ms
       const excelEpoch = new Date(Date.UTC(1899, 11, 30));
       const ms = Number(value) * 24 * 60 * 60 * 1000;
-      return new Date(excelEpoch.getTime() + ms);
+      const d = new Date(excelEpoch.getTime() + ms);
+      // normaliza para meio-dia local
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0);
     }
 
     const s = String(value).trim();
@@ -231,7 +242,7 @@ class GoogleSheetsService {
     let m = s.match(iso);
     if (m) {
       const [, y, mo, d] = m;
-      return new Date(Number(y), Number(mo) - 1, Number(d));
+      return new Date(Number(y), Number(mo) - 1, Number(d), 12, 0, 0);
     }
 
     // DD/MM/YYYY
@@ -239,31 +250,71 @@ class GoogleSheetsService {
     m = s.match(br);
     if (m) {
       const [, d, mo, y] = m;
-      return new Date(Number(y), Number(mo) - 1, Number(d));
+      return new Date(Number(y), Number(mo) - 1, Number(d), 12, 0, 0);
     }
 
     // tenta Date nativo
     const t = new Date(s);
-    return isNaN(t.getTime()) ? null : t;
+    if (isNaN(t.getTime())) return null;
+    return new Date(t.getFullYear(), t.getMonth(), t.getDate(), 12, 0, 0);
   }
 
   // ---------------------------
   // Métricas
   // ---------------------------
   calculateMetrics(orders) {
-    const totalDemandas = orders.length;
-    const totalRelatorios = orders.filter((o) => o.isRelatorio).length;
-    const relatoriosPendentes = orders.filter((o) => o.isRelatorio && !o.isConcluido).length;
-    const relatoriosAtrasados = orders.filter((o) => o.isAtrasado).length;
-    const totalConcluidos = orders.filter((o) => o.isConcluido).length;
+    // --- filtros de ano ---
+    const anoAlvo = 2025;
+    const hoje = new Date();
+    const mesesDecorridos2025 = (hoje.getFullYear() === anoAlvo)
+      ? (hoje.getMonth() + 1)   // jan=1 .. mês atual
+      : 12;
 
+    // ordens de 2024/2025
+    const orders2024 = orders.filter(o => o.dataEntregaDate && o.dataEntregaDate.getFullYear() === 2024);
+    const orders2025 = orders.filter(o => o.dataEntregaDate && o.dataEntregaDate.getFullYear() === 2025);
+
+    // SOMENTE RELATÓRIOS em 2025
+    const relatorios2025 = orders2025.filter(o => o.isRelatorio);
+
+    // clientes ativos em 2025 (com relatório)
+    const clientes2025 = new Set(
+      relatorios2025
+        .map(o => (o.cliente1 || '').toString().trim())
+        .filter(Boolean)
+    );
+    const totalClientes2025 = clientes2025.size || 1;
+
+    // média: relatórios / mês / cliente
+    const relatoriosPorMesCliente2025 = (relatorios2025.length > 0)
+      ? (relatorios2025.length / mesesDecorridos2025) / totalClientes2025
+      : 0;
+
+    // (demais métricas)
+    const totalDemandas = orders.length;
+    const totalRelatorios = orders.filter(o => o.isRelatorio).length;
+    const relatoriosPendentes = orders.filter(o => o.isRelatorio && !o.isConcluido).length;
+    const relatoriosAtrasados = orders.filter(o => o.isAtrasado).length;
+    const totalConcluidos = orders.filter(o => o.isConcluido).length;
     const taxaConclusao = totalDemandas > 0 ? (totalConcluidos / totalDemandas) * 100 : 0;
 
-    const clientesUnicos = [...new Set(orders.map((o) => o.cliente1).filter((c) => (c || '').trim()))];
-    const tiposDemanda = [...new Set(orders.map((o) => o.tipoDemanda).filter((t) => (t || '').trim()))];
+    const clientesUnicos = [...new Set(orders.map(o => o.cliente1).filter(c => (c || '').trim()))];
+    const tiposDemanda = [...new Set(orders.map(o => o.tipoDemanda).filter(t => (t || '').trim()))];
 
-    const orders2024 = orders.filter((o) => o.dataEntregaDate && o.dataEntregaDate.getFullYear() === 2024);
-    const orders2025 = orders.filter((o) => o.dataEntregaDate && o.dataEntregaDate.getFullYear() === 2025);
+    // LOGS de debug
+    console.log('=== DEBUG CÁLCULO 2025 ===');
+    console.log('Total de ordens:', orders.length);
+    console.log('Ordens com data válida:', orders.filter(o => o.dataEntregaDate).length);
+    console.log('Ordens 2024:', orders2024.length);
+    console.log('Ordens 2025:', orders2025.length);
+    console.log('Relatórios 2025:', relatorios2025.length);
+    console.log('Clientes com relatório em 2025:', totalClientes2025);
+    console.log('Meses decorridos (2025):', mesesDecorridos2025);
+    console.log('================================');
+
+    // Também manter a média mensal geral (todas as ordens) para quem já usa
+    const monthlyAverage2025 =
+      mesesDecorridos2025 > 0 ? (orders2025.length / mesesDecorridos2025) : 0;
 
     return {
       totalDemandas,
@@ -277,6 +328,11 @@ class GoogleSheetsService {
       totalClientes: clientesUnicos.length,
       orders2024: orders2024.length,
       orders2025: orders2025.length,
+
+      // médias
+      monthlyAverage2025: Math.round(monthlyAverage2025 * 10) / 10,                     // todas as ordens
+      relatoriosPorMesCliente2025: Math.round(relatoriosPorMesCliente2025 * 100) / 100, // **métrica do cartão**
+
       crescimentoPercentual:
         orders2024.length > 0
           ? Math.round(((orders2025.length - orders2024.length) / orders2024.length) * 10000) / 100
@@ -284,24 +340,111 @@ class GoogleSheetsService {
     };
   }
 
-  // ---------------------------
-  // Tipos únicos para o dashboard (com id/label/value)
-  // ---------------------------
-  extractUniqueContentTypes(orders) {
-    const uniqueTypes = [...new Set(
-      orders
-        .map((o) => (o.tipoDemanda || '').toString().trim())
-        .filter(Boolean)
-    )].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+// ==========================================
+// CORREÇÃO PARA googleSheetsService.js - FUNÇÃO extractUniqueContentTypes
+// ==========================================
 
-    console.log('🏷️ Tipos únicos extraídos da coluna "Tipo de demanda":', uniqueTypes);
+extractUniqueContentTypes(orders) {
+  console.log('🏷️ [TIPOS] Extraindo e normalizando tipos únicos...');
+  
+  // Map para rastrear tipos normalizados e suas versões preferenciais
+  const tiposMap = new Map();
+  let totalProcessados = 0;
 
-    return uniqueTypes.map((tipo) => ({
-      id: tipo.toLowerCase().replace(/\s+/g, '_'),
-      label: tipo,
-      value: tipo,
-    }));
-  }
+  orders.forEach((order, index) => {
+    const tipoOriginal = (order.tipoDemanda || '').toString().trim();
+    
+    if (!tipoOriginal) return;
+    
+    const tipoNormalizado = tipoOriginal.toLowerCase();
+    
+    // Log dos primeiros 10 para debug
+    if (index < 10) {
+      console.log(`🔍 [TIPOS] Ordem ${index}: "${tipoOriginal}" → "${tipoNormalizado}"`);
+    }
+    
+    // Se já temos esse tipo normalizado
+    if (tiposMap.has(tipoNormalizado)) {
+      const existente = tiposMap.get(tipoNormalizado);
+      
+      // Escolher a versão preferida
+      const versaoPreferida = this.escolherVersaoPreferida(existente.original, tipoOriginal);
+      
+      tiposMap.set(tipoNormalizado, {
+        original: versaoPreferida,
+        normalizado: tipoNormalizado,
+        contador: existente.contador + 1
+      });
+    } else {
+      // Primeiro encontro deste tipo
+      tiposMap.set(tipoNormalizado, {
+        original: tipoOriginal,
+        normalizado: tipoNormalizado,
+        contador: 1
+      });
+    }
+    
+    totalProcessados++;
+  });
+
+  // Converter Map para array de tipos únicos
+  const tiposUnicos = Array.from(tiposMap.values())
+    .map(tipo => tipo.original)
+    .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
+  console.log('🏷️ [TIPOS] === RESULTADO FINAL ===');
+  console.log(`📊 [TIPOS] Total processado: ${totalProcessados}`);
+  console.log(`✅ [TIPOS] Tipos únicos encontrados: ${tiposUnicos.length}`);
+  console.log('🏷️ [TIPOS] Primeiros 10:', tiposUnicos.slice(0, 10));
+
+  // Retornar no formato esperado pelo sistema
+  const resultado = tiposUnicos.map((tipo) => ({
+    id: tipo.toLowerCase()
+      .replace(/\s+/g, '_')
+      .replace(/[áàâãä]/g, 'a')
+      .replace(/[éèêë]/g, 'e') 
+      .replace(/[íìîï]/g, 'i')
+      .replace(/[óòôõö]/g, 'o')
+      .replace(/[úùûü]/g, 'u')
+      .replace(/[ç]/g, 'c')
+      .replace(/[^a-z0-9_]/g, ''),
+    label: tipo,
+    value: tipo,
+  }));
+
+  console.log('🏷️ Tipos únicos extraídos da coluna "Tipo de demanda":', resultado.map(r => r.label));
+  return resultado;
+}
+
+// ==========================================
+// NOVA FUNÇÃO AUXILIAR - ADICIONAR NO googleSheetsService.js
+// ==========================================
+
+escolherVersaoPreferida(versaoA, versaoB) {
+  // Critério 1: Preferir versão com primeira letra maiúscula
+  const primeiraLetraA = versaoA.charAt(0);
+  const primeiraLetraB = versaoB.charAt(0);
+  
+  const aTemMaiuscula = primeiraLetraA === primeiraLetraA.toUpperCase();
+  const bTemMaiuscula = primeiraLetraB === primeiraLetraB.toUpperCase();
+  
+  if (aTemMaiuscula && !bTemMaiuscula) return versaoA;
+  if (!aTemMaiuscula && bTemMaiuscula) return versaoB;
+  
+  // Critério 2: Preferir versão com mais palavras capitalizadas
+  const palavrasCapitalizadasA = (versaoA.match(/\b[A-Z]/g) || []).length;
+  const palavrasCapitalizadasB = (versaoB.match(/\b[A-Z]/g) || []).length;
+  
+  if (palavrasCapitalizadasA > palavrasCapitalizadasB) return versaoA;
+  if (palavrasCapitalizadasB > palavrasCapitalizadasA) return versaoB;
+  
+  // Critério 3: Preferir versão mais longa (mais completa)
+  if (versaoA.length > versaoB.length) return versaoA;
+  if (versaoB.length > versaoA.length) return versaoB;
+  
+  // Se tudo igual, manter a primeira versão encontrada
+  return versaoA;
+}
 
   // ---------------------------
   // Formato por cliente (compatível com seu dashboard)

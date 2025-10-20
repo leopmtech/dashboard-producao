@@ -25,7 +25,7 @@ async function fetchAllFromDatabase(databaseId) {
       database_id: databaseId,
       start_cursor: cursor,
       page_size: 100,
-      sorts: [{ property: 'last_edited_time', direction: 'descending' }],
+      // sorts: [{ property: 'last_edited_time', direction: 'descending' }],
     });
     pages.push(...res.results);
     cursor = res.has_more ? res.next_cursor : undefined;
@@ -78,5 +78,6 @@ app.get('/api/notion/orders', async (req, res) => {
   }
 });
 
-const port = process.env.PORT || 4000;
+// �� MUDANÇA AQUI: Alterar porta padrão de 4000 para 8000
+const port = process.env.PORT || 8000;
 app.listen(port, () => console.log(`🚀 Notion API server rodando em http://localhost:${port}`));

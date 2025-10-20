@@ -1,22 +1,22 @@
 // ==========================================
-// src/hooks/useDashboardData.js - COEXISTÊNCIA NOTION + SHEETS
+// src/hooks/useDashboardData.js - COEXISTÊNCIA NOTION + SHEETS (AJUSTADO)
 // ==========================================
 
 import { useState, useEffect, useCallback } from 'react';
-import notionService from '../services/notionService';
+import notionService from '../services/notionService';          // ✅ mantém apenas um
 import googleSheetsService from '../services/googleSheetsService';
 import { DataProcessingService } from '../services/dataProcessingService';
 
 // --- Helpers de merge --- //
 const sumSafe = (a = 0, b = 0) => (Number(a) || 0) + (Number(b) || 0);
 
+// Soma por cliente e meses (janeiro...dezembro), mantendo totais/coerência
 function mergeClientsArrays(a = [], b = []) {
-  // Agrupa por cliente e soma campos relevantes
   const map = new Map();
 
   const push = (item) => {
     if (!item || !item.cliente) return;
-    const key = item.cliente.trim();
+    const key = String(item.cliente).trim();
     const prev = map.get(key) || {
       cliente: key,
       total: 0,
@@ -60,21 +60,171 @@ function mergeClientsArrays(a = [], b = []) {
   return Array.from(map.values());
 }
 
+// Unifica contentTypes no formato { id, label, value } com dedupe e normalização
 function dedupeContentTypes(listA = [], listB = []) {
-  // items no formato { id, label, value }
+  console.log('🔗 [MERGE] Consolidando tipos de conteúdo...');
+  console.log('🔗 [MERGE] Lista A (Notion):', listA.length, 'itens');
+  console.log('🔗 [MERGE] Lista B (Sheets):', listB.length, 'itens');
+  
   const byId = new Map();
-  const push = (it) => {
+  
+  // Função para escolher a melhor versão entre duas strings
+  const escolherMelhorVersao = (versaoA, versaoB) => {
+    if (!versaoA) return versaoB;
+    if (!versaoB) return versaoA;
+    
+    // Critério 1: Preferir versão com primeira letra maiúscula
+    const primeiraLetraA = versaoA.charAt(0);
+    const primeiraLetraB = versaoB.charAt(0);
+    
+    const aTemMaiuscula = primeiraLetraA === primeiraLetraA.toUpperCase();
+    const bTemMaiuscula = primeiraLetraB === primeiraLetraB.toUpperCase();
+    
+    if (aTemMaiuscula && !bTemMaiuscula) return versaoA;
+    if (!aTemMaiuscula && bTemMaiuscula) return versaoB;
+    
+    // Critério 2: Preferir versão com mais palavras capitalizadas
+    const palavrasCapitalizadasA = (versaoA.match(/\b[A-Z]/g) || []).length;
+    const palavrasCapitalizadasB = (versaoB.match(/\b[A-Z]/g) || []).length;
+    
+    if (palavrasCapitalizadasA > palavrasCapitalizadasB) return versaoA;
+    if (palavrasCapitalizadasB > palavrasCapitalizadasA) return versaoB;
+    
+    // Critério 3: Preferir versão mais longa (mais completa)
+    if (versaoA.length > versaoB.length) return versaoA;
+    if (versaoB.length > versaoA.length) return versaoB;
+    
+    // Se tudo igual, manter a primeira versão
+    return versaoA;
+  };
+  
+  const push = (it, fonte) => {
     if (!it) return;
-    const id = it.id || (it.value || it.label || '').toLowerCase().replace(/\s+/g, '_');
-    if (!id) return;
-    if (!byId.has(id)) {
-      byId.set(id, { id, label: it.label || it.value || it.id, value: it.value || it.label || it.id });
+    
+    const fallback = String(it.value || it.label || it.id || '').trim();
+    if (!fallback) return;
+    
+    // Gerar ID normalizado (lowercase, sem espaços, sem acentos)
+    const idNormalizado = fallback.toLowerCase()
+      .replace(/\s+/g, '_')
+      .replace(/[áàâãä]/g, 'a')
+      .replace(/[éèêë]/g, 'e')
+      .replace(/[íìîï]/g, 'i')
+      .replace(/[óòôõö]/g, 'o')
+      .replace(/[úùûü]/g, 'u')
+      .replace(/[ç]/g, 'c')
+      .replace(/[^a-z0-9_]/g, '');
+    
+    if (!idNormalizado) return;
+    
+    const novoLabel = it.label || it.value || it.id || fallback;
+    const novoValue = it.value || it.label || it.id || fallback;
+    
+    // Se já existe, escolher a melhor versão
+    if (byId.has(idNormalizado)) {
+      const existente = byId.get(idNormalizado);
+      const melhorLabel = escolherMelhorVersao(existente.label, novoLabel);
+      const melhorValue = escolherMelhorVersao(existente.value, novoValue);
+      
+      console.log(`🔄 [MERGE] Conflito resolvido: "${existente.label}" vs "${novoLabel}" → "${melhorLabel}"`);
+      
+      byId.set(idNormalizado, {
+        id: idNormalizado,
+        label: melhorLabel,
+        value: melhorValue
+      });
+    } else {
+      // Primeiro encontro
+      console.log(`➕ [MERGE] Novo tipo (${fonte}): "${novoLabel}"`);
+      byId.set(idNormalizado, {
+        id: idNormalizado,
+        label: novoLabel,
+        value: novoValue
+      });
     }
   };
-  listA.forEach(push);
-  listB.forEach(push);
-  return Array.from(byId.values()).sort((x, y) => x.label.localeCompare(y.label, 'pt-BR'));
+  
+  // Processar listas (Notion primeiro, depois Sheets para dar prioridade ao Sheets)
+  listA.forEach(item => push(item, 'Notion'));
+  listB.forEach(item => push(item, 'Sheets'));
+  
+  const resultado = Array.from(byId.values()).sort((x, y) => 
+    x.label.localeCompare(y.label, 'pt-BR')
+  );
+  
+  console.log('🔗 [MERGE] === CONSOLIDAÇÃO FINAL ===');
+  console.log(`✅ [MERGE] Tipos únicos consolidados: ${resultado.length}`);
+  console.log('🔗 [MERGE] Primeiros 10:', resultado.slice(0, 10).map(r => r.label));
+  
+  return resultado;
 }
+
+// Merge genérico: se ambos são arrays e parecem "mensal por cliente", soma por mês; caso contrário concatena (com dedupe).
+const mergeColecaoPorClienteEMes = (baseArr = [], rtArr = []) => {
+  const index = new Map();
+  const coerce = (v) => (typeof v === 'number' && !Number.isNaN(v) ? v : 0);
+  const meses = ['janeiro','fevereiro','marco','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+  const clone = (x) => JSON.parse(JSON.stringify(x));
+
+  for (const item of baseArr) {
+    if (!item || !item.cliente) continue;
+    index.set(item.cliente, clone(item));
+  }
+  for (const item of rtArr) {
+    if (!item || !item.cliente) continue;
+    const curr = index.get(item.cliente) || { cliente: item.cliente };
+    for (const m of meses) curr[m] = coerce(curr[m]) + coerce(item[m]);
+    if (typeof curr.total === 'number' || typeof item.total === 'number') {
+      curr.total = coerce(curr.total) + coerce(item.total);
+    }
+    if (item.tipo && !curr.tipo) curr.tipo = item.tipo;
+    index.set(item.cliente, curr);
+  }
+  return Array.from(index.values());
+};
+
+const mergeColecoes = (sheetsData = {}, notionData = {}) => {
+  const result = { ...sheetsData };
+  for (const [key, value] of Object.entries(notionData)) {
+    if (key === 'lastUpdate' || key === 'type') continue;
+
+    const baseVal = result[key];
+    if (Array.isArray(baseVal) && Array.isArray(value)) {
+      const pareceMensal = value.some(v => v && typeof v === 'object' && ('cliente' in v));
+      if (pareceMensal) {
+        result[key] = mergeColecaoPorClienteEMes(baseVal, value);
+      } else {
+        const seen = new Set(baseVal.map(v => JSON.stringify(v)));
+        for (const v of value) {
+          const s = JSON.stringify(v);
+          if (!seen.has(s)) { baseVal.push(v); seen.add(s); }
+        }
+        result[key] = baseVal;
+      }
+    } else if (baseVal === undefined) {
+      result[key] = value;
+    } else {
+      // Conflitos não-array: prioriza Notion (tempo real)
+      result[key] = value;
+    }
+  }
+  result.lastUpdate = notionData.lastUpdate || sheetsData.lastUpdate || new Date().toISOString();
+  return result;
+};
+
+// Deduplicação simples de orders por id (ou hash do conteúdo)
+const dedupeOrders = (a = [], b = []) => {
+  const keyOf = (o) => o?.id || o?.orderId || JSON.stringify(o);
+  const seen = new Set();
+  const out = [];
+  for (const src of [a, b]) {
+    for (const o of (src || [])) {
+      const k = keyOf(o);
+      if (!seen.has(k)) { seen.add(k); out.push(o); }
+    }
+  }
+  return out;
+};
 
 const useDashboardData = () => {
   // Estados principais
@@ -114,20 +264,12 @@ const useDashboardData = () => {
 
       // Busca em paralelo
       const [notionRes, sheetsRes] = await Promise.allSettled([
-        // Se precisar ainda passar dbName temporariamente: notionService.getDashboardData({ dbName: 'NomeDB' })
-        notionService.getDashboardData(),
-        googleSheetsService.getDashboardData(useCache)
+        notionService.getDashboardData(),                // tempo real (via /api/notion/orders)
+        googleSheetsService.getDashboardData(useCache)   // histórico (Sheets)
       ]);
 
-      let notionData = null;
-      let sheetsData = null;
-
-      if (notionRes.status === 'fulfilled' && notionRes.value) {
-        notionData = notionRes.value;
-      }
-      if (sheetsRes.status === 'fulfilled' && sheetsRes.value) {
-        sheetsData = sheetsRes.value;
-      }
+      let notionData = (notionRes.status === 'fulfilled') ? notionRes.value : null;
+      let sheetsData = (sheetsRes.status === 'fulfilled') ? sheetsRes.value : null;
 
       // Atualiza status de fontes
       setSourceStatus({
@@ -143,26 +285,30 @@ const useDashboardData = () => {
         throw new Error('Falha ao carregar Notion e Google Sheets.');
       }
 
-      // --- Mesclar originalOrders --- //
-      const originalOrdersMerged = [
-        ...(notionData?.originalOrders || []),
-        ...(sheetsData?.originalOrders || []),
-      ];
+      // Merge genérico de todas coleções conhecidas
+      const baseMerged = mergeColecoes(sheetsData || {}, notionData || {});
 
-      // --- Mesclar visaoGeral por cliente somando campos --- //
+      // Mesclar originalOrders com dedupe
+      const originalOrdersMerged = dedupeOrders(
+        notionData?.originalOrders || [],
+        sheetsData?.originalOrders || []
+      );
+
+      // Mesclar visaoGeral por cliente somando campos
       const visaoGeralMerged = mergeClientsArrays(
         notionData?.visaoGeral || [],
         sheetsData?.visaoGeral || []
       );
 
-      // --- Unir contentTypes --- //
+      // Unir contentTypes
       const contentTypesMerged = dedupeContentTypes(
         notionData?.contentTypes || [],
         sheetsData?.contentTypes || []
       );
 
-      // Montar payload no mesmo shape esperado
+      // Montar payload final no shape usado pelo App
       const merged = {
+        ...baseMerged, // inclui outras coleções que porventura seu app use
         totalSheets: (notionData ? 1 : 0) + (sheetsData ? 1 : 0),
         loadedAt: new Date().toISOString(),
         sheetName: 'notion+sheets',
@@ -170,7 +316,7 @@ const useDashboardData = () => {
         metrics: notionData?.metrics || sheetsData?.metrics || {},
         contentTypes: contentTypesMerged,
 
-        // Coleções que o App usa
+        // Coleções principais padronizadas
         visaoGeral: visaoGeralMerged,
         visaoGeral2024: visaoGeralMerged.filter(c => (c['2024'] || 0) > 0),
         diarios: visaoGeralMerged,

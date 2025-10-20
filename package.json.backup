@@ -1,0 +1,68 @@
+{
+  "name": "dashboard-social-bi",
+  "version": "1.0.0",
+  "description": "Dashboard interativo para acompanhamento de produção de Social Listening e BI",
+  "private": true,
+  "homepage": ".",
+  "engines": {
+    "node": "18.x"
+  },
+  "proxy": "http://localhost:8000",
+  "dependencies": {
+    "@notionhq/client": "^5.1.0",
+    "@testing-library/jest-dom": "^5.16.4",
+    "@testing-library/react": "^13.3.0",
+    "@testing-library/user-event": "^13.5.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "google-auth-library": "^8.9.0",
+    "googleapis": "^118.0.0",
+    "lucide-react": "^0.544.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-scripts": "5.0.1",
+    "recharts": "^2.6.2",
+    "web-vitals": "^2.1.4"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject",
+    "server": "node server/index.js",
+    "dev": "concurrently "npm run start" "npm run server"",
+    "kill-ports": "kill -9 $(lsof -ti:3000,8000) 2>/dev/null || true"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "keywords": [
+    "dashboard",
+    "social-listening",
+    "business-intelligence",
+    "google-sheets",
+    "react",
+    "analytics"
+  ],
+  "author": "Sua Empresa",
+  "license": "MIT"
+}

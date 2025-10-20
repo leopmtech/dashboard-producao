@@ -52,8 +52,17 @@ function App() {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [insights, setInsights] = useState([]);
 
-  // 👇 agora também recebemos demandTypes (lista única da coluna "Tipo de demanda")
-  const { data, loading, error, lastUpdate, refreshData, exportData, demandTypes } = useDashboardData();
+  // 🔧 CORRIGIDO - agora recebe uniqueDemandTypes consolidados
+  const { data, loading, error, lastUpdate, refreshData, exportData, demandTypes, uniqueDemandTypes } = useDashboardData();
+
+  // Debug dos tipos consolidados
+  React.useEffect(() => {
+    if (uniqueDemandTypes) {
+      console.log('🎯 [APP.JS] uniqueDemandTypes recebidos:', uniqueDemandTypes);
+      console.log('🎯 [APP.JS] Total de tipos únicos:', uniqueDemandTypes.length);
+      console.log('🎯 [APP.JS] Primeiros 5 tipos:', uniqueDemandTypes.slice(0, 5));
+    }
+  }, [uniqueDemandTypes]);
 
   // ==========================================
   // FUNÇÕES AUXILIARES
@@ -224,86 +233,86 @@ function App() {
   // ==========================================
   const renderDashboard = () => (
     <>
-      {/* KPIs Dinâmicos */}
-      <div className="kpis-grid modern">
-        {filters.periodo === 'ambos' ? (
-          <>
-            <KPICard
-              title="Clientes Analisados"
-              value={metrics.totalClientes || 0}
-              subtitle={`${filters.cliente !== 'todos' ? 'Cliente: ' + filters.cliente : 'Todos os clientes'}`}
-              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-              delay="100ms"
-            />
-            <KPICard
-              title="Crescimento Médio"
-              value={`${metrics.crescimento > 0 ? '+' : ''}${metrics.crescimento || 0}%`}
-              subtitle="Comparando médias mensais"
-              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-              delay="200ms"
-            />
-            <KPICard
-              title="Média 2024"
-              value={metrics.mediaMensal2024 || 0}
-              subtitle="Relatórios/mês/cliente"
-              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-              delay="300ms"
-            />
-            <KPICard
-              title="Média 2025"
-              value={metrics.mediaMensal2025 || 0}
-              subtitle="Relatórios/mês/cliente"
-              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-              delay="400ms"
-            />
-            <KPICard
-              title="Melhor Performance"
-              value={metrics.melhorCliente?.cliente || 'N/A'}
-              subtitle={`+${metrics.melhorCliente?.crescimento || 0}% crescimento`}
-              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-              delay="500ms"
-            />
-          </>
-        ) : (
-          <>
-            <KPICard
-              title="Clientes Filtrados"
-              value={metrics.totalClientes || 0}
-              subtitle={`Período: ${filters.periodo} • Tipo: ${filters.tipo}`}
-              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-              delay="100ms"
-            />
-            <KPICard
-              title="Total de Relatórios"
-              value={metrics.totalRelatorios || 0}
-              subtitle={`${filters.cliente !== 'todos' ? filters.cliente : 'Todos'} em ${filters.periodo}`}
-              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-              delay="200ms"
-            />
-            <KPICard
-              title="Média Mensal"
-              value={metrics.mediaMensal || 0}
-              subtitle="Por cliente filtrado"
-              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-              delay="300ms"
-            />
-            <KPICard
-              title="Produtividade"
-              value={metrics.produtividade || 0}
-              subtitle="Relatórios/mês total"
-              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-              delay="400ms"
-            />
-            <KPICard
-              title="Melhor Cliente"
-              value={metrics.melhorCliente?.cliente || 'N/A'}
-              subtitle={`${metrics.melhorCliente?.total || 0} relatórios`}
-              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-              delay="500ms"
-            />
-          </>
-        )}
-      </div>
+{/* KPIs Dinâmicos */}
+<div className="kpis-grid modern">
+  {filters.periodo === 'ambos' ? (
+    <>
+      <KPICard
+        title="Clientes Analisados"
+        value={uniqueClients.length || 0}  {/* 🔧 CORRIGIDO - usa uniqueClients */}
+        subtitle={`${filters.cliente !== 'todos' ? 'Cliente: ' + filters.cliente : 'Todos os clientes únicos'}`}
+        gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+        delay="100ms"
+      />
+      <KPICard
+        title="Crescimento Médio"
+        value={`${metrics.crescimento > 0 ? '+' : ''}${metrics.crescimento || 0}%`}
+        subtitle="Comparando médias mensais"
+        gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+        delay="200ms"
+      />
+      <KPICard
+        title="Média de demandas (2024)"
+        value={metrics.mediaMensal2024 || 0}
+        subtitle="Relatórios/mês/cliente"
+        gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+        delay="300ms"
+      />
+      <KPICard
+        title="Média de demandas (2025)"
+        value={metrics.mediaMensal2025 || 0}
+        subtitle="Relatórios/mês/cliente"
+        gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+        delay="400ms"
+      />
+      <KPICard
+        title="Cliente com mais demandas"
+        value={metrics.melhorCliente?.cliente || 'N/A'}
+        subtitle={`+${metrics.melhorCliente?.crescimento || 0}% crescimento`}
+        gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+        delay="500ms"
+      />
+    </>
+  ) : (
+    <>
+      <KPICard
+        title="Clientes Filtrados"
+        value={filteredData?.visaoGeral?.length || 0}  {/* 🔧 CORRIGIDO - dados filtrados */}
+        subtitle={`Período: ${filters.periodo} • Tipo: ${filters.tipo}`}
+        gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+        delay="100ms"
+      />
+      <KPICard
+        title="Total de Relatórios"
+        value={metrics.totalRelatorios || 0}
+        subtitle={`${filters.cliente !== 'todos' ? filters.cliente : 'Todos'} em ${filters.periodo}`}
+        gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+        delay="200ms"
+      />
+      <KPICard
+        title="Média Mensal"
+        value={metrics.mediaMensal || 0}
+        subtitle="Por cliente filtrado"
+        gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+        delay="300ms"
+      />
+      <KPICard
+        title="Produtividade"
+        value={metrics.produtividade || 0}
+        subtitle="Relatórios/mês total"
+        gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+        delay="400ms"
+      />
+      <KPICard
+        title="Melhor Cliente"
+        value={metrics.melhorCliente?.cliente || 'N/A'}
+        subtitle={`${metrics.melhorCliente?.total || 0} relatórios`}
+        gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+        delay="500ms"
+      />
+    </>
+  )}
+</div>
 
       {/* Gráfico Comparativo In.pacto vs STA */}
       <div className="charts-row modern">
@@ -355,7 +364,7 @@ function App() {
           : `Análise de performance ${filters.periodo} • Dados atualizados automaticamente`
       }
       dataKey={filters.periodo === 'ambos' ? 'media2025' : 'total'}
-      orders={data?.originalOrders}  // 👈 necessário para preencher a coluna “Demandas”
+      orders={data?.originalOrders}  // 👈 necessário para preencher a coluna "Demandas"
     />
   </div>
 </div>
@@ -795,7 +804,7 @@ function App() {
         </div>
       )}
 
-      {/* Filtros (somente no dashboard) */}
+      {/* 🔧 FILTROS CORRIGIDOS - Agora usando os dados consolidados */}
       {currentView === 'dashboard' && (
         <div className="dashboard-filters modern">
           <div className="filters-content">
@@ -853,27 +862,37 @@ function App() {
                 </select>
               </div>
 
+              {/* 🎯 DROPDOWN CORRIGIDO - Usando uniqueDemandTypes consolidados */}
               <div className="filter-group-labeled">
                 <label className="filter-label-title">
                   <span className="filter-icon">📋</span>
-                  Tipo de Conteúdo
+                  Tipo de Conteúdo ({uniqueDemandTypes?.length || 0} tipos únicos consolidados)
                 </label>
                 <select
                   value={filters.tipo}
                   onChange={(e) => handleFilterChange('tipo', e.target.value)}
                   className="filter-select modern"
                 >
-                  {/* opção padrão que mantém compatibilidade com seus componentes */}
+                  {/* Opção padrão */}
                   <option value="geral">📊 Relatórios Gerais</option>
 
-                  {/* popula com os valores únicos de "Tipo de demanda" vindos da planilha */}
-                  {(demandTypes || []).map((t) => (
-                    <option key={t} value={t}>{t}</option>
+                  {/* 🔧 CORRIGIDO - Usando uniqueDemandTypes consolidados (49 tipos únicos) */}
+                  {(uniqueDemandTypes || []).map((type) => (
+                    <option key={type.id} value={type.value}>
+                      📝 {type.label}
+                    </option>
                   ))}
 
-                  {/* opcional: manter "design" explícito, caso seus gráficos tenham lógica especial */}
-                  {/* <option value="design">🎨 Criações & Design</option> */}
+                  {/* Opção especial para design */}
+                  <option value="design">🎨 Criações & Design</option>
                 </select>
+                
+                {/* Debug info */}
+                {uniqueDemandTypes && (
+                  <div style={{ fontSize: '11px', color: '#666', marginTop: '4px' }}>
+                    ✅ {uniqueDemandTypes.length} tipos consolidados (Notion + Sheets)
+                  </div>
+                )}
               </div>
             </div>
 
@@ -912,7 +931,7 @@ function App() {
                   ? `Filtros ativos: ${filteredData?.visaoGeral?.length || 0} clientes, ${
                       filteredData?.visaoGeral?.reduce((sum, c) => sum + (c.total || 0), 0) || 0
                     } relatórios`
-                  : 'Visualizando todos os dados da nova planilha - Nenhum filtro ativo'}
+                  : `Visualizando todos os dados • ${uniqueDemandTypes?.length || 0} tipos consolidados disponíveis`}
               </span>
             </div>
           </div>

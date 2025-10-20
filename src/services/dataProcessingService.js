@@ -70,106 +70,115 @@ export class DataProcessingService {
 
     return filteredData;
   }
-
-  // ==========================================
-  // EXTRAIR CLIENTES ÚNICOS - MÉTODO FALTANDO
-  // ==========================================
   
-  static getUniqueClients(data) {
-    console.log('🏢 [CLIENTES] Extraindo clientes únicos...');
-    
-    if (!data) {
-      console.warn('⚠️ [CLIENTES] Dados não fornecidos');
-      return [];
-    }
+// ==========================================
+// CORREÇÃO PARA dataProcessingService.js - FUNÇÃO getUniqueClients
+// ==========================================
 
-    try {
-      const clientesSet = new Set();
-      
-      // Extrair de visaoGeral (2025)
-      if (data.visaoGeral && Array.isArray(data.visaoGeral)) {
-        data.visaoGeral.forEach(item => {
-          if (item.cliente && item.cliente.trim()) {
-            clientesSet.add(item.cliente.trim());
-          }
-        });
-      }
-      
-      // Extrair de visaoGeral2024
-      if (data.visaoGeral2024 && Array.isArray(data.visaoGeral2024)) {
-        data.visaoGeral2024.forEach(item => {
-          if (item.cliente && item.cliente.trim()) {
-            clientesSet.add(item.cliente.trim());
-          }
-        });
-      }
-      
-      // Extrair de originalOrders
-      if (data.originalOrders && Array.isArray(data.originalOrders)) {
-        data.originalOrders.forEach(order => {
-          const cliente = order.cliente1 || order.cliente;
-          if (cliente && cliente.trim()) {
-            clientesSet.add(cliente.trim());
-          }
-        });
-      }
-      
-      // Extrair de design
-      if (data.design && Array.isArray(data.design)) {
-        data.design.forEach(item => {
-          if (item.cliente && item.cliente.trim()) {
-            clientesSet.add(item.cliente.trim());
-          }
-        });
-      }
-      
-      // Extrair de outras seções se existirem
-      const otherSections = ['diarios', 'semanais', 'mensais', 'especiais', 'diagnosticos'];
-      otherSections.forEach(section => {
-        if (data[section] && Array.isArray(data[section])) {
-          data[section].forEach(item => {
-            if (item.cliente && item.cliente.trim()) {
-              clientesSet.add(item.cliente.trim());
-            }
-          });
-        }
-        
-        // Versões 2024
-        const section2024 = section + '2024';
-        if (data[section2024] && Array.isArray(data[section2024])) {
-          data[section2024].forEach(item => {
-            if (item.cliente && item.cliente.trim()) {
-              clientesSet.add(item.cliente.trim());
-            }
-          });
-        }
-      });
-      
-      // Converter Set para Array e ordenar
-      const clientesUnicos = Array.from(clientesSet).sort((a, b) => {
-        // Ordenar alfabeticamente, mas com prioridade para alguns clientes importantes
-        const prioridade = ['ANP', 'PETROBRAS', 'VALE', 'CFQ', 'GOVGO', 'MS'];
-        const indexA = prioridade.indexOf(a);
-        const indexB = prioridade.indexOf(b);
-        
-        if (indexA !== -1 && indexB !== -1) return indexA - indexB;
-        if (indexA !== -1) return -1;
-        if (indexB !== -1) return 1;
-        return a.localeCompare(b, 'pt-BR');
-      });
-      
-      console.log('🏢 [CLIENTES] Clientes únicos encontrados:', {
-        total: clientesUnicos.length,
-        clientes: clientesUnicos
-      });
-      
-      return clientesUnicos;
-      
-    } catch (error) {
-      console.error('❌ [CLIENTES] Erro ao extrair clientes únicos:', error);
-      return [];
-    }
+static getUniqueClients(data) {
+  console.log('🏢 [CLIENTES] Extraindo clientes únicos...');
+  
+  if (!data) {
+    console.warn('⚠️ [CLIENTES] Dados não fornecidos');
+    return [];
   }
+
+  try {
+    const clientesSet = new Set();
+    
+    // Função auxiliar para processar cliente e separar por vírgula
+    const processarCliente = (clienteValue) => {
+      if (!clienteValue || !clienteValue.trim()) return;
+      
+      const clienteLimpo = String(clienteValue).trim();
+      
+      // Se contém vírgula, separar
+      if (clienteLimpo.includes(',')) {
+        const clientesSeparados = clienteLimpo.split(',');
+        clientesSeparados.forEach(cliente => {
+          const clienteIndividual = cliente.trim();
+          if (clienteIndividual) {
+            clientesSet.add(clienteIndividual);
+          }
+        });
+      } else {
+        // Cliente único
+        clientesSet.add(clienteLimpo);
+      }
+    };
+    
+    // Extrair de visaoGeral (2025)
+    if (data.visaoGeral && Array.isArray(data.visaoGeral)) {
+      data.visaoGeral.forEach(item => {
+        processarCliente(item.cliente);
+      });
+    }
+    
+    // Extrair de visaoGeral2024
+    if (data.visaoGeral2024 && Array.isArray(data.visaoGeral2024)) {
+      data.visaoGeral2024.forEach(item => {
+        processarCliente(item.cliente);
+      });
+    }
+    
+    // Extrair de originalOrders
+    if (data.originalOrders && Array.isArray(data.originalOrders)) {
+      data.originalOrders.forEach(order => {
+        const cliente = order.cliente1 || order.cliente;
+        processarCliente(cliente);
+      });
+    }
+    
+    // Extrair de design
+    if (data.design && Array.isArray(data.design)) {
+      data.design.forEach(item => {
+        processarCliente(item.cliente);
+      });
+    }
+    
+    // Extrair de outras seções se existirem
+    const otherSections = ['diarios', 'semanais', 'mensais', 'especiais', 'diagnosticos'];
+    otherSections.forEach(section => {
+      if (data[section] && Array.isArray(data[section])) {
+        data[section].forEach(item => {
+          processarCliente(item.cliente);
+        });
+      }
+      
+      // Versões 2024
+      const section2024 = section + '2024';
+      if (data[section2024] && Array.isArray(data[section2024])) {
+        data[section2024].forEach(item => {
+          processarCliente(item.cliente);
+        });
+      }
+    });
+    
+    // Converter Set para Array e ordenar
+    const clientesUnicos = Array.from(clientesSet).sort((a, b) => {
+      // Ordenar alfabeticamente, mas com prioridade para alguns clientes importantes
+      const prioridade = ['ANP', 'PETROBRAS', 'VALE', 'CFQ', 'GOVGO', 'MS'];
+      const indexA = prioridade.indexOf(a);
+      const indexB = prioridade.indexOf(b);
+      
+      if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+      if (indexA !== -1) return -1;
+      if (indexB !== -1) return 1;
+      return a.localeCompare(b, 'pt-BR');
+    });
+    
+    console.log('🏢 [CLIENTES] Clientes únicos encontrados:', {
+      total: clientesUnicos.length,
+      clientes: clientesUnicos.slice(0, 10) // Primeiros 10 para debug
+    });
+    
+    return clientesUnicos;
+    
+  } catch (error) {
+    console.error('❌ [CLIENTES] Erro ao extrair clientes únicos:', error);
+    return [];
+  }
+}
 
   // ==========================================
   // CALCULAR MÉTRICAS AVANÇADAS
@@ -437,42 +446,126 @@ export class DataProcessingService {
   }
 
   // ==========================================
-  // RESTANTE DOS MÉTODOS (mantidos iguais)
-  // ==========================================
+// CORREÇÃO PARA dataProcessingService.js - FUNÇÃO extractUniqueContentTypes
+// ==========================================
+
+static extractUniqueContentTypes(data) {
+  console.log('🏷️ [TIPOS] Extraindo tipos únicos de demanda (normalizado)...');
   
-  static extractUniqueContentTypes(data) {
-    console.log('🏷️ [TIPOS] Extraindo tipos únicos de demanda...');
-    
-    if (!data || !data.originalOrders || !Array.isArray(data.originalOrders)) {
-      console.warn('⚠️ [TIPOS] Dados originalOrders não encontrados');
-      return [];
-    }
-
-    try {
-      const uniqueTypes = [...new Set(data.originalOrders
-        .map(order => order.tipoDemanda)
-        .filter(tipo => tipo && tipo.trim() !== '')
-        .map(tipo => tipo.trim())
-      )].sort();
-
-      console.log('🏷️ [TIPOS] Tipos únicos encontrados:', uniqueTypes);
-
-      const formattedTypes = uniqueTypes.map(tipo => ({
-        id: tipo.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''),
-        label: tipo,
-        value: tipo,
-        icon: this.getIconForDemandType(tipo),
-        category: this.categorizeDemandType(tipo)
-      }));
-
-      return formattedTypes;
-
-    } catch (error) {
-      console.error('❌ [TIPOS] Erro ao extrair tipos únicos:', error);
-      return [];
-    }
+  if (!data || !data.originalOrders || !Array.isArray(data.originalOrders)) {
+    console.warn('⚠️ [TIPOS] Dados originalOrders não encontrados');
+    return [];
   }
 
+  try {
+    // Map para rastrear tipos normalizados e suas versões preferenciais
+    const tiposMap = new Map();
+    let totalProcessados = 0;
+
+    console.log(`📊 [TIPOS] Processando ${data.originalOrders.length} ordens...`);
+
+    data.originalOrders.forEach((order, index) => {
+      const tipoOriginal = order.tipoDemanda;
+      
+      if (!tipoOriginal || !tipoOriginal.trim()) return;
+      
+      const tipoLimpo = tipoOriginal.trim();
+      const tipoNormalizado = tipoLimpo.toLowerCase();
+      
+      // Log dos primeiros 10 para debug
+      if (index < 10) {
+        console.log(`🔍 [TIPOS] Ordem ${index}: "${tipoLimpo}" → "${tipoNormalizado}"`);
+      }
+      
+      // Se já temos esse tipo normalizado
+      if (tiposMap.has(tipoNormalizado)) {
+        const existente = tiposMap.get(tipoNormalizado);
+        
+        // Preferir a versão com primeira letra maiúscula
+        const versaoPreferida = this.escolherVersaoPreferida(existente.original, tipoLimpo);
+        
+        tiposMap.set(tipoNormalizado, {
+          original: versaoPreferida,
+          normalizado: tipoNormalizado,
+          contador: existente.contador + 1
+        });
+      } else {
+        // Primeiro encontro deste tipo
+        tiposMap.set(tipoNormalizado, {
+          original: tipoLimpo,
+          normalizado: tipoNormalizado,
+          contador: 1
+        });
+      }
+      
+      totalProcessados++;
+    });
+
+    // Converter Map para array de tipos únicos
+    const tiposUnicos = Array.from(tiposMap.values())
+      .map(tipo => tipo.original)
+      .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
+    console.log('🏷️ [TIPOS] === RESULTADO FINAL ===');
+    console.log(`📊 [TIPOS] Total processado: ${totalProcessados}`);
+    console.log(`✅ [TIPOS] Tipos únicos encontrados: ${tiposUnicos.length}`);
+    console.log('🏷️ [TIPOS] Primeiros 10:', tiposUnicos.slice(0, 10));
+
+    // Formatar para o padrão esperado pelo sistema
+    const formattedTypes = tiposUnicos.map(tipo => ({
+      id: tipo.toLowerCase()
+        .replace(/\s+/g, '_')
+        .replace(/[áàâãä]/g, 'a')
+        .replace(/[éèêë]/g, 'e')
+        .replace(/[íìîï]/g, 'i')
+        .replace(/[óòôõö]/g, 'o')
+        .replace(/[úùûü]/g, 'u')
+        .replace(/[ç]/g, 'c')
+        .replace(/[^a-z0-9_]/g, ''),
+      label: tipo,
+      value: tipo,
+      icon: this.getIconForDemandType(tipo),
+      category: this.categorizeDemandType(tipo)
+    }));
+
+    console.log('🏷️ [TIPOS] Tipos formatados:', formattedTypes.length);
+    return formattedTypes;
+
+  } catch (error) {
+    console.error('❌ [TIPOS] Erro ao extrair tipos únicos:', error);
+    return [];
+  }
+}
+
+// ==========================================
+// NOVA FUNÇÃO AUXILIAR - ESCOLHER VERSÃO PREFERIDA
+// ==========================================
+
+static escolherVersaoPreferida(versaoA, versaoB) {
+  // Critério 1: Preferir versão com primeira letra maiúscula
+  const primeiraLetraA = versaoA.charAt(0);
+  const primeiraLetraB = versaoB.charAt(0);
+  
+  const aTemMaiuscula = primeiraLetraA === primeiraLetraA.toUpperCase();
+  const bTemMaiuscula = primeiraLetraB === primeiraLetraB.toUpperCase();
+  
+  if (aTemMaiuscula && !bTemMaiuscula) return versaoA;
+  if (!aTemMaiuscula && bTemMaiuscula) return versaoB;
+  
+  // Critério 2: Preferir versão com mais palavras capitalizadas
+  const palavrasCapitalizadasA = (versaoA.match(/\b[A-Z]/g) || []).length;
+  const palavrasCapitalizadasB = (versaoB.match(/\b[A-Z]/g) || []).length;
+  
+  if (palavrasCapitalizadasA > palavrasCapitalizadasB) return versaoA;
+  if (palavrasCapitalizadasB > palavrasCapitalizadasA) return versaoB;
+  
+  // Critério 3: Preferir versão mais longa (mais completa)
+  if (versaoA.length > versaoB.length) return versaoA;
+  if (versaoB.length > versaoA.length) return versaoB;
+  
+  // Se tudo igual, manter a primeira versão encontrada
+  return versaoA;
+}
   static getIconForDemandType(tipo) {
     const tipoLower = tipo.toLowerCase();
     

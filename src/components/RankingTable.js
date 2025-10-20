@@ -4,11 +4,12 @@
 // ==========================================
 import React from 'react';
 
-const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = null }) => {
+const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = null, totalUniqueClients = null }) => {
   console.log('📋 [RANKING TABLE v2] Dados recebidos:', {
     length: data?.length || 0,
     dataKey,
-    orders: Array.isArray(orders) ? orders.length : '—'
+    orders: Array.isArray(orders) ? orders.length : '—',
+    totalUniqueClients
   });
 
   // Mapa Cliente -> nº de demandas a partir das ordens originais
@@ -122,8 +123,7 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = n
   return (
     <div className="chart-container modern">
       <h3 className="chart-title">{title}</h3>
-      {subtitle && <p className="chart-subtitle">{subtitle}</p>
-      }
+      {subtitle && <p className="chart-subtitle">{subtitle}</p>}
 
       {/* Tabela de Ranking */}
       <div style={{
@@ -150,7 +150,7 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = n
                     <span style={{ fontSize: '0.75rem', opacity: '0.9' }}>(rel/mês)</span>
                   </th>
                   <th style={{ padding: '16px 12px', textAlign: 'center', fontWeight: '600' }}>
-                    📈 Média 2025<br />
+                    �� Média 2025<br />
                     <span style={{ fontSize: '0.75rem', opacity: '0.9' }}>(rel/mês)</span>
                   </th>
                   <th style={{ padding: '16px 12px', textAlign: 'center', fontWeight: '600' }}>
@@ -257,7 +257,7 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = n
         </table>
       </div>
 
-      {/* Resumo Estatístico */}
+      {/* 🔧 RESUMO ESTATÍSTICO CORRIGIDO */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
@@ -272,10 +272,25 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = n
           textAlign: 'center'
         }}>
           <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#FF6B47' }}>
-            {processedData.length}
+            {totalUniqueClients || processedData.length}  {/* 🔧 CORRIGIDO - usa prop consistente */}
           </div>
           <div style={{ fontSize: '0.9rem', color: '#6B7280' }}>
-            Clientes Analisados
+            Clientes Únicos Disponíveis
+          </div>
+        </div>
+
+        <div style={{
+          padding: '16px',
+          backgroundColor: '#E0F2FE',
+          border: '1px solid #7DD3FC',
+          borderRadius: '12px',
+          textAlign: 'center'
+        }}>
+          <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#0284C7' }}>
+            {processedData.length}  {/* 🔧 NOVO - mostra clientes no ranking */}
+          </div>
+          <div style={{ fontSize: '0.9rem', color: '#0369A1' }}>
+            No Ranking Atual
           </div>
         </div>
 
