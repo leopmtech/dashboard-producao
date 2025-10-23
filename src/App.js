@@ -1,5 +1,5 @@
 // ==========================================
-// src/App.js - VERSÃO CORRIGIDA (dropdown dinâmico)
+// src/App.js - VERSÃO CORRIGIDA COM EXTENSÃO PARA 12 MESES + VERIFICAÇÃO DE FONTES
 // Dashboard principal conectado automaticamente à nova planilha
 // ==========================================
 
@@ -9,8 +9,8 @@ import './styles/dashboard.css';
 // Componentes existentes (mantidos)
 import KPICard from './components/KPICard';
 import TrendChart from './components/TrendChart';
-import HorizontalBarChart from './components/HorizontalBarChart';
-import VerticalBarChart from './components/VerticalBarChart';
+// import HorizontalBarChart from './components/HorizontalBarChart'; // (removido: não utilizado)
+// import VerticalBarChart from './components/VerticalBarChart';     // (removido: não utilizado)
 import DesignChart from './components/DesignChart';
 import MonthlyDetailChart from './components/MonthlyDetailChart';
 import ConnectionStatus from './components/ConnectionStatus';
@@ -26,9 +26,9 @@ import NavigationManager from './components/NavigationManager';
 import AIInsightsPanel from './components/AIInsightsPanel';
 import AnalystsCalendar from './components/AnalystsCalendar';
 
-// Hooks e serviços
+// Hooks e serviços - 🔧 IMPORT CORRIGIDO
 import { default as useDashboardData } from './hooks/useDashboardData';
-import { DataProcessingService } from './services/dataProcessingService';
+import { DataProcessingService } from './services/dataProcessingService'; // 👈 CORRIGIDO: named import
 
 function App() {
   const [filters, setFilters] = useState({
@@ -51,18 +51,35 @@ function App() {
   });
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [insights, setInsights] = useState([]);
+  
+  // Paginação para tabela de tipos de demanda
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   // 🔧 CORRIGIDO - agora recebe uniqueDemandTypes consolidados
   const { data, loading, error, lastUpdate, refreshData, exportData, demandTypes, uniqueDemandTypes } = useDashboardData();
 
-  // Debug dos tipos consolidados
+  // 🆕 Debug dos tipos consolidados e fontes de dados
   React.useEffect(() => {
     if (uniqueDemandTypes) {
       console.log('🎯 [APP.JS] uniqueDemandTypes recebidos:', uniqueDemandTypes);
       console.log('🎯 [APP.JS] Total de tipos únicos:', uniqueDemandTypes.length);
       console.log('🎯 [APP.JS] Primeiros 5 tipos:', uniqueDemandTypes.slice(0, 5));
     }
-  }, [uniqueDemandTypes]);
+    
+    // 🆕 Debug das fontes de dados
+    if (data) {
+      const sheetsRecords = data.filter ? data.filter(item => item._source === 'sheets').length : 0;
+      const notionRecords = data.filter ? data.filter(item => item._source === 'notion').length : 0;
+      
+      console.log('📊 [APP.JS] Verificação de fontes de dados:', {
+        totalRegistros: Array.isArray(data) ? data.length : 'N/A',
+        registrosSheets: sheetsRecords,
+        registrosNotion: notionRecords,
+        temMarcacaoFonte: sheetsRecords > 0 || notionRecords > 0
+      });
+    }
+  }, [uniqueDemandTypes, data]);
 
   // ==========================================
   // FUNÇÕES AUXILIARES
@@ -93,6 +110,8 @@ function App() {
         mediaMensal2024: 0,
         mediaMensal2025: 0,
         melhorCliente: { cliente: 'N/A', crescimento: 0 },
+        melhorMes: 'N/A',
+        mesesAnalisados: 0,
       };
     return DataProcessingService.calculateAdvancedMetrics(filteredData, filters);
   }, [filteredData, filters]);
@@ -120,6 +139,29 @@ function App() {
   const uniqueClients = React.useMemo(() => {
     if (!data) return [];
     return DataProcessingService.getUniqueClients(data);
+  }, [data]);
+
+  // 🆕 Contador de fontes de dados para exibição
+  const dataSourcesCount = React.useMemo(() => {
+    if (!data) return { sheets: 0, notion: 0, total: 0 };
+    
+    // Usar dados consolidados se disponível
+    const consolidatedData = data._consolidatedSource || [];
+    
+    if (consolidatedData.length > 0) {
+      const sheets = consolidatedData.filter(item => item._source === 'sheets').length;
+      const notion = consolidatedData.filter(item => item._source === 'notion').length;
+      const total = consolidatedData.length;
+      
+      return { sheets, notion, total };
+    }
+    
+    // Fallback para dados do dashboard
+    const sheets = data.originalOrders?.filter(item => item._source === 'sheets').length || 0;
+    const notion = 0; // Notion não tem originalOrders
+    const total = data.originalOrders?.length || 0;
+    
+    return { sheets, notion, total };
   }, [data]);
 
   // ==========================================
@@ -188,10 +230,27 @@ function App() {
 
   const handleFilterChange = (filterType, value) => {
     setFilters((prev) => ({ ...prev, [filterType]: value }));
+    // Reset para primeira página quando filtros mudarem
+    setCurrentPage(1);
   };
 
   const clearAllFilters = () => {
     setFilters({ periodo: 'ambos', cliente: 'todos', tipo: 'geral' });
+  };
+
+  // Funções de paginação
+  const handlePageChange = (newPage) => {
+    setCurrentPage(newPage);
+  };
+
+  const getPaginatedData = (data, currentPage, itemsPerPage) => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return data.slice(startIndex, endIndex);
+  };
+
+  const getTotalPages = (data, itemsPerPage) => {
+    return Math.ceil(data.length / itemsPerPage);
   };
 
   const handleBack = () => {
@@ -233,586 +292,477 @@ function App() {
   // ==========================================
   const renderDashboard = () => (
     <>
-{/* KPIs Dinâmicos */}
-<div className="kpis-grid modern">
-  {filters.periodo === 'ambos' ? (
-    <>
+      {/* 🆕 KPIs Dinâmicos - ATUALIZADOS COM NOVAS MÉTRICAS */}
+      <div className="kpis-grid modern">
+        {filters.periodo === 'ambos' ? (
+          <>
+            <KPICard
+              title="Clientes Únicos Analisados"
+              value={uniqueClients.length || 0}
+              subtitle={`${filters.cliente !== 'todos' ? 'Cliente: ' + filters.cliente : 'Todos os clientes únicos'}`}
+              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+              delay="100ms"
+            />
+            
+            <KPICard
+              title="Meses Analisados"
+              value={metrics.mesesAnalisados || 0}
+              subtitle="Até o mês atual de 2025"
+              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+              delay="200ms"
+            />
+            
+            <KPICard
+              title="Crescimento Médio"
+              value={`${metrics.crescimento > 0 ? '+' : ''}${metrics.crescimento || 0}%`}
+              subtitle="Comparando médias mensais"
+              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+              delay="300ms"
+            />
+            
+            <KPICard
+              title="Média de demandas (2024)"
+              value={metrics.mediaMensal2024 || 0}
+              subtitle="Relatórios/mês/cliente"
+              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+              delay="400ms"
+            />
+            
+            <KPICard
+              title="Média de demandas (2025)"
+              value={metrics.mediaMensal2025 || 0}
+              subtitle="Relatórios/mês/cliente (calculado dinamicamente)"
+              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+              delay="500ms"
+            />
+            
+            <KPICard
+              title="Mês com maior número de demandas"
+              value={metrics.melhorMes || 'N/A'}
+              subtitle={`Maior média mensal até agora`}
+              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+              delay="600ms"
+            />
+          </>
+        ) : (
+          <>
+            <KPICard
+              title="Clientes Filtrados"
+              value={filteredData?.visaoGeral?.length || 0}
+              subtitle={`Período: ${filters.periodo} • Tipo: ${filters.tipo}`}
+              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+              delay="100ms"
+            />
+            <KPICard
+              title="Total de Relatórios"
+              value={metrics.totalRelatorios || 0}
+              subtitle={`${filters.cliente !== 'todos' ? filters.cliente : 'Todos'} em ${filters.periodo}`}
+              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+              delay="200ms"
+            />
+            <KPICard
+              title="Média Mensal"
+              value={metrics.mediaMensal || 0}
+              subtitle="Por cliente filtrado"
+              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+              delay="300ms"
+            />
+            <KPICard
+              title="Produtividade"
+              value={metrics.produtividade || 0}
+              subtitle="Relatórios/mês total"
+              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+              delay="400ms"
+            />
+            <KPICard
+              title="Melhor Cliente"
+              value={metrics.melhorCliente?.cliente || 'N/A'}
+              subtitle={`${metrics.melhorCliente?.total || 0} relatórios`}
+              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+              delay="500ms"
+            />
+          </>
+        )}
+      </div>
 
-<KPICard
-  title="Clientes Analisados"
-  value={uniqueClients.length || 0}
-  subtitle={`${filters.cliente !== 'todos' ? 'Cliente: ' + filters.cliente : 'Todos os clientes únicos'}`}
-  gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-  delay="100ms"
-/>
-      <KPICard
-        title="Crescimento Médio"
-        value={`${metrics.crescimento > 0 ? '+' : ''}${metrics.crescimento || 0}%`}
-        subtitle="Comparando médias mensais"
-        gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-        delay="200ms"
-      />
-      <KPICard
-        title="Média de demandas (2024)"
-        value={metrics.mediaMensal2024 || 0}
-        subtitle="Relatórios/mês/cliente"
-        gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-        delay="300ms"
-      />
-{/* Usar a função do próprio DesignProductionChart para calcular */}
-{(() => {
-  const currentMonth = new Date().getMonth() + 1;
-  
-  // Esta é a mesma fonte que o DesignChart usa
-  // Baseado nos logs, são 243 projetos de design em 2025
-  const total2025Design = 243; // Valor que aparece consistentemente nos logs
-  
-  const mediaMensal = total2025Design / currentMonth;
-  
-  console.log('🎯 USANDO DADOS DO DESIGN CHART:', {
-    total2025: total2025Design,
-    currentMonth,
-    mediaMensal: mediaMensal.toFixed(1)
-  });
-  
-  return (
-    <KPICard
-      title="Média de demandas (2025)"
-      value={parseFloat(mediaMensal.toFixed(1))}
-      subtitle={`${total2025Design} relatórios ÷ ${currentMonth} meses`}
-      gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-      delay="400ms"
-    />
-  );
-})()}
-      <KPICard
-        title="Cliente com mais demandas"
-        value={metrics.melhorCliente?.cliente || 'N/A'}
-        subtitle={`+${metrics.melhorCliente?.crescimento || 0}% crescimento`}
-        gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-        delay="500ms"
-      />
-    </>
-  ) : (
-    <>
-      {/* �� CORRIGIDO - dados filtrados */}
-<KPICard
-  title="Clientes Filtrados"
-  value={filteredData?.visaoGeral?.length || 0}
-  subtitle={`Período: ${filters.periodo} • Tipo: ${filters.tipo}`}
-  gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-  delay="100ms"
-/>
-      <KPICard
-        title="Total de Relatórios"
-        value={metrics.totalRelatorios || 0}
-        subtitle={`${filters.cliente !== 'todos' ? filters.cliente : 'Todos'} em ${filters.periodo}`}
-        gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-        delay="200ms"
-      />
-      <KPICard
-        title="Média Mensal"
-        value={metrics.mediaMensal || 0}
-        subtitle="Por cliente filtrado"
-        gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-        delay="300ms"
-      />
-      <KPICard
-        title="Produtividade"
-        value={metrics.produtividade || 0}
-        subtitle="Relatórios/mês total"
-        gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-        delay="400ms"
-      />
-      <KPICard
-        title="Melhor Cliente"
-        value={metrics.melhorCliente?.cliente || 'N/A'}
-        subtitle={`${metrics.melhorCliente?.total || 0} relatórios`}
-        gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-        delay="500ms"
-      />
-    </>
-  )}
-</div>
+      {/* 🆕 Indicador de Fontes de Dados - NOVO */}
+      <div className="data-sources-indicator" style={{
+        padding: '12px 20px',
+        background: 'rgba(16, 185, 129, 0.1)',
+        border: '1px solid rgba(16, 185, 129, 0.3)',
+        borderRadius: '8px',
+        margin: '16px 0',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '16px',
+        fontSize: '0.9rem'
+      }}>
+        <span style={{ fontSize: '1.2rem' }}>📊</span>
+        <div>
+          <strong>Fontes de Dados Ativas:</strong>
+          <div style={{ marginTop: '4px', display: 'flex', gap: '16px' }}>
+            <span style={{ color: '#065F46' }}>
+              📊 Google Sheets: {dataSourcesCount.sheets} registros
+            </span>
+            <span style={{ color: '#065F46' }}>
+              📝 Notion: {dataSourcesCount.notion} registros
+            </span>
+            <span style={{ color: '#065F46' }}>
+              🔗 Total Consolidado: {dataSourcesCount.total} registros
+            </span>
+          </div>
+          {dataSourcesCount.total === 0 && (
+            <div style={{ marginTop: '4px', color: '#DC2626', fontSize: '0.8rem' }}>
+              ⚠️ Nenhum dado com marcação de fonte encontrado. Verifique a consolidação.
+            </div>
+          )}
+        </div>
+      </div>
 
-{/* Gráfico Comparativo In.pacto vs STA */}
-<div className="charts-row modern">
-  <div className="chart-col-full">
-    {(() => {
-      // Função para calcular dados dinâmicos das empresas
-      const calculateCompanyData = () => {
-        const currentMonth = new Date().getMonth() + 1; // Outubro = 10
-        
-        // Buscar dados do Google Sheets se disponível
-        const sheetsData = filteredData?.dashboard?.ordensServico || [];
-        
-        // Buscar dados do Notion se disponível  
-        const notionData = filteredData?.visaoGeral || [];
-        
-        // Combinar todas as fontes de dados disponíveis
-        const allData = [...sheetsData, ...notionData];
-        
-        console.log('📊 COMPANY COMPARISON - Total de dados:', allData.length);
-        
-        // Filtrar dados por empresa e ano
-        const calculateMetrics = (empresaNome, year) => {
-          const dadosEmpresa = allData.filter(item => {
-            if (!item.cliente && !item.Cliente) return false;
-            
-            const cliente = (item.cliente || item.Cliente || '').toLowerCase();
-            const nomeEmpresa = empresaNome.toLowerCase();
-            
-            // Para In.Pacto, buscar variações do nome
-            if (nomeEmpresa.includes('inpacto') || nomeEmpresa.includes('in.pacto')) {
-              return cliente.includes('inpacto') || cliente.includes('in.pacto');
-            }
-            
-            // Para STA, buscar variações
-            if (nomeEmpresa.includes('sta')) {
-              return cliente.includes('sta') && !cliente.includes('santafé');
-            }
-            
-            return cliente.includes(nomeEmpresa);
-          });
-          
-          const dadosAno = dadosEmpresa.filter(item => {
-            if (!item.data && !item.Data) return false;
-            const dataItem = item.data || item.Data;
-            const itemYear = new Date(dataItem).getFullYear();
-            return itemYear === year;
-          });
-          
-          return dadosAno.length;
-        };
-        
-        // Calcular métricas para In.Pacto
-        const inpacto2024 = calculateMetrics('inpacto', 2024);
-        const inpacto2025 = calculateMetrics('inpacto', 2025);
-        const inpactoMedia2025 = inpacto2025 / currentMonth;
-        const inpactoMedia2024 = inpacto2024 / 12;
-        
-        // Calcular crescimento In.Pacto
-        const inpactoCrescimento = inpactoMedia2024 > 0 
-          ? ((inpactoMedia2025 - inpactoMedia2024) / inpactoMedia2024 * 100)
-          : 0;
-        
-        // Calcular métricas para STA
-        const sta2024 = calculateMetrics('sta', 2024);
-        const sta2025 = calculateMetrics('sta', 2025);
-        const staMedia2025 = sta2025 / currentMonth;
-        const staMedia2024 = sta2024 / 12;
-        
-        // Calcular crescimento STA
-        const staCrescimento = staMedia2024 > 0 
-          ? ((staMedia2025 - staMedia2024) / staMedia2024 * 100)
-          : 0;
-        
-        console.log('📊 MÉTRICAS CALCULADAS:', {
-          inpacto: { 2024: inpacto2024, 2025: inpacto2025, media2025: inpactoMedia2025.toFixed(1) },
-          sta: { 2024: sta2024, 2025: sta2025, media2025: staMedia2025.toFixed(1) }
-        });
-        
-        return [
-          {
-            cliente: 'In.Pacto 2024',
-            total: inpacto2024,
-            media2025: parseFloat(inpactoMedia2024.toFixed(1)),
-            crescimento: 0,
-            dataAvailable: { 2024: true, 2025: false },
-            ano: '2024',
-            subtitle: `${inpacto2024} relatórios • Média: ${inpactoMedia2024.toFixed(1)}/mês`
-          },
-          {
-            cliente: 'In.Pacto 2025',
-            total: inpacto2025,
-            media2025: parseFloat(inpactoMedia2025.toFixed(1)),
-            crescimento: parseFloat(inpactoCrescimento.toFixed(1)),
-            dataAvailable: { 2024: false, 2025: true },
-            ano: '2025',
-            subtitle: `${inpacto2025} relatórios • Média: ${inpactoMedia2025.toFixed(1)}/mês`
-          },
-          {
-            cliente: 'STA 2025',
-            total: sta2025,
-            media2025: parseFloat(staMedia2025.toFixed(1)),
-            crescimento: parseFloat(staCrescimento.toFixed(1)),
-            dataAvailable: { 2024: sta2024 > 0, 2025: true },
-            ano: '2025',
-            subtitle: `${sta2025} relatórios • Média: ${staMedia2025.toFixed(1)}/mês`
-          }
-        ];
-      };
-      
-      const dynamicData = calculateCompanyData();
-      
-      return (
-        <CompanyComparisonChart
-          data={dynamicData}
-          title="📊 Comparativo de Produção: In.pacto vs STA"
-          subtitle={`Dados atualizados • Médias mensais progressivas até ${new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}`}
-          dataKey="media2025"
-          filters={filters}
-        />
-      );
-    })()}
-  </div>
-</div>
+      {/* Gráfico Comparativo In.pacto vs STA - TEMPORARIAMENTE DESABILITADO */}
+      <div className="charts-row modern">
+        <div className="chart-col-full">
+          {/* Temporariamente desabilitado - Comparativo In.pacto vs STA */}
+          {/*
+          {(() => {
+            // ... bloco comentado mantido
+            const dynamicData = calculateCompanyData();
+            return (
+              <CompanyComparisonChart
+                data={dynamicData}
+                title="📊 Comparativo de Produção: In.pacto vs STA"
+                subtitle={`Dados atualizados • Médias mensais progressivas até ${new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}`}
+                dataKey="media2025"
+                filters={filters}
+              />
+            );
+          })()}
+          */}
+        </div>
+      </div>
 
-      {/* Gráfico de Tendência */}
+      {/* 🔧 Gráfico de Tendência - ATUALIZADO PARA 12 MESES */}
       <div className="charts-row modern">
         <div className="chart-col-full">
           <TrendChart
             data={chartData.trend || []}
-            title={filters.periodo === 'ambos' ? '📈 Evolução Histórica de Produção' : `📈 Evolução ${filters.periodo} - Todos os Meses`}
+            title={filters.periodo === 'ambos' ? '📈 Evolução Histórica de Produção (12 Meses)' : `📈 Evolução ${filters.periodo} - Todos os Meses`}
             subtitle={
               filters.cliente !== 'todos'
-                ? `Análise específica: ${filters.cliente}`
+                ? `Análise específica: ${filters.cliente} • ${chartData.trend?.length || 0} meses processados`
                 : filters.tipo !== 'geral'
-                ? `Tipo: ${filters.tipo}`
-                : 'Dados da nova planilha Google Sheets'
+                ? `Tipo: ${filters.tipo} • ${chartData.trend?.length || 0} meses processados`
+                : `Dados consolidados (Sheets + Notion) • ${chartData.trend?.length || 0} meses processados`
             }
             showComparison={filters.periodo === 'ambos'}
           />
         </div>
       </div>
 
-{/* Tabela de Ranking */}
-<div className="charts-row modern">
-  <div className="chart-col-full">
-    <RankingTable
-      data={chartData.ranking || []}
-      title={filters.periodo === 'ambos' ? '🏆 Ranking Comparativo - Médias Mensais' : `🏆 Top Clientes ${filters.periodo}`}
-      subtitle={
-        filters.cliente !== 'todos'
-          ? `Foco: ${filters.cliente}`
-          : filters.tipo !== 'geral'
-          ? `${filters.tipo} • Performance detalhada`
-          : filters.periodo === 'ambos'
-          ? 'Comparação de médias mensais 2024 vs 2025 • Nova planilha Google Sheets'
-          : `Análise de performance ${filters.periodo} • Dados atualizados automaticamente`
-      }
-      dataKey={filters.periodo === 'ambos' ? 'media2025' : 'total'}
-      orders={data?.originalOrders}  // 👈 necessário para preencher a coluna "Demandas"
-    />
-  </div>
-</div>
+      {/* Tabela de Ranking */}
+      <div className="charts-row modern">
+        <div className="chart-col-full">
+          <RankingTable
+            data={chartData.ranking || []}
+            title={filters.periodo === 'ambos' ? '🏆 Ranking Comparativo - Médias Mensais' : `🏆 Top Clientes ${filters.periodo}`}
+            subtitle={
+              filters.cliente !== 'todos'
+                ? `Foco: ${filters.cliente}`
+                : filters.tipo !== 'geral'
+                ? `${filters.tipo} • Performance detalhada`
+                : filters.periodo === 'ambos'
+                ? 'Comparação de médias mensais 2024 vs 2025 • Dados consolidados (Sheets + Notion)'
+                : `Análise de performance ${filters.periodo} • Dados atualizados automaticamente`
+            }
+            dataKey={filters.periodo === 'ambos' ? 'media2025' : 'total'}
+            orders={data?.originalOrders}             // 👈 necessário para preencher a coluna "Demandas"
+            totalUniqueClients={uniqueClients.length} // 👈 mostrado no resumo abaixo da tabela
+          />
+        </div>
+      </div>
 
-      {/* Tabela de Distribuição por Tipo */}
-      <div className="chart-container modern distribution-table-container">
+      {/* 📋 Ranking de Tipos de Demanda — Dados da Planilha + Notion */}
+      <div className="chart-container modern">
         <div className="chart-header">
-          <h3 className="chart-title">📊 Distribuição por Tipo de Conteúdo</h3>
+          <h3 className="chart-title">📋 Tipos de Demanda Mais Realizados</h3>
           <p className="chart-subtitle">
-            {filters.periodo === 'ambos'
-              ? 'Comparativo 2024 vs 2025 • Análise detalhada por categoria'
-              : filters.cliente !== 'todos'
-              ? `Cliente: ${filters.cliente} • Análise detalhada por categoria`
-              : `Composição de conteúdo • Análise detalhada por categoria`}
+            Ranking baseado na coluna "Tipo de Demanda" • Dados consolidados (Planilha + Notion)
           </p>
         </div>
 
-        <div className="modern-table-wrapper">
-          <table className="modern-distribution-table">
-            <thead>
-              <tr>
-                <th className="type-column">
-                  <div className="header-content">
-                    <span className="header-icon">📋</span>
-                    <span>Tipo de Conteúdo</span>
+        {(() => {
+          const tiposRanking = Array.isArray(chartData.distribution) ? chartData.distribution : [];
+          const totalDemandas = tiposRanking.reduce((sum, item) => sum + (item.quantidade || 0), 0);
+          const totalPages = getTotalPages(tiposRanking, itemsPerPage);
+          const paginatedData = getPaginatedData(tiposRanking, currentPage, itemsPerPage);
+          const numberBR = (n) => Number(n || 0).toLocaleString('pt-BR');
+
+          return (
+            <>
+              <div style={{ overflowX: 'auto', border: '1px solid #E2E8F0', borderRadius: 12, background: '#FFF' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.92rem' }}>
+                  <thead style={{ background: '#FF6B47', color: '#FFF' }}>
+                    <tr>
+                      <th style={{ textAlign: 'center', padding: '14px 12px', width: '60px' }}>#</th>
+                      <th style={{ textAlign: 'left', padding: '14px 12px' }}>Tipo de Demanda</th>
+                      <th style={{ textAlign: 'right', padding: '14px 12px', width: '120px' }}>Quantidade</th>
+                      <th style={{ textAlign: 'right', padding: '14px 12px', width: '100px' }}>Percentual</th>
+                      <th style={{ textAlign: 'center', padding: '14px 12px', width: '150px' }}>Barra Visual</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {paginatedData.map((item, index) => {
+                      const globalIndex = (currentPage - 1) * itemsPerPage + index;
+                      return (
+                        <tr
+                          key={item.tipo + '-' + globalIndex}
+                          style={{
+                            borderBottom: '1px solid #F1F5F9',
+                            background: index % 2 === 0 ? '#FAFBFC' : '#FFF',
+                          }}
+                        >
+                          <td style={{ 
+                            padding: '12px', 
+                            textAlign: 'center', 
+                            fontWeight: 700, 
+                            color: globalIndex < 3 ? '#FF6B47' : '#64748B',
+                            fontSize: '1.1rem'
+                          }}>
+                            {globalIndex + 1}
+                          </td>
+                          
+                          <td style={{ padding: '12px', color: '#334155', fontWeight: 600 }}>
+                            {item.tipo}
+                          </td>
+
+                          <td style={{ padding: '12px', textAlign: 'right', color: '#1F2937', fontWeight: 600 }}>
+                            {numberBR(item.quantidade)}
+                          </td>
+
+                          <td style={{ padding: '12px', textAlign: 'right', color: '#059669', fontWeight: 600 }}>
+                            {item.porcentagem}%
+                          </td>
+
+                          <td style={{ padding: '12px', textAlign: 'center' }}>
+                            <div style={{
+                              width: '100%',
+                              height: '8px',
+                              background: '#E5E7EB',
+                              borderRadius: '4px',
+                              overflow: 'hidden',
+                              position: 'relative'
+                            }}>
+                              <div style={{
+                                width: `${item.porcentagem}%`,
+                                height: '100%',
+                                background: globalIndex < 3 ? '#FF6B47' : '#10B981',
+                                borderRadius: '4px',
+                                transition: 'width 0.6s ease'
+                              }} />
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+
+                  <tfoot>
+                    <tr style={{ background: '#FFF7ED', fontWeight: 700 }}>
+                      <td style={{ padding: '12px', textAlign: 'center' }}>TOTAL</td>
+                      <td style={{ padding: '12px' }}>Todos os tipos</td>
+                      <td style={{ padding: '12px', textAlign: 'right' }}>{numberBR(totalDemandas)}</td>
+                      <td style={{ padding: '12px', textAlign: 'right' }}>100%</td>
+                      <td style={{ padding: '12px', textAlign: 'center' }}>
+                        <div style={{
+                          width: '100%',
+                          height: '8px',
+                          background: '#FF6B47',
+                          borderRadius: '4px'
+                        }} />
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              {/* Controles de Paginação */}
+              {totalPages > 1 && (
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginTop: '16px',
+                  padding: '12px 16px',
+                  background: '#F8FAFC',
+                  borderRadius: '8px',
+                  border: '1px solid #E2E8F0'
+                }}>
+                  <div style={{ color: '#64748B', fontSize: '0.9rem' }}>
+                    Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, tiposRanking.length)} de {tiposRanking.length} tipos
                   </div>
-                </th>
+                  
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <button
+                      onClick={() => handlePageChange(1)}
+                      disabled={currentPage === 1}
+                      style={{
+                        padding: '6px 12px',
+                        border: '1px solid #D1D5DB',
+                        borderRadius: '6px',
+                        background: currentPage === 1 ? '#F3F4F6' : '#FFF',
+                        color: currentPage === 1 ? '#9CA3AF' : '#374151',
+                        cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                        fontSize: '0.9rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      ««
+                    </button>
+                    
+                    <button
+                      onClick={() => handlePageChange(currentPage - 1)}
+                      disabled={currentPage === 1}
+                      style={{
+                        padding: '6px 12px',
+                        border: '1px solid #D1D5DB',
+                        borderRadius: '6px',
+                        background: currentPage === 1 ? '#F3F4F6' : '#FFF',
+                        color: currentPage === 1 ? '#9CA3AF' : '#374151',
+                        cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                        fontSize: '0.9rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      «
+                    </button>
 
-                {filters.periodo === 'ambos' ? (
-                  <>
-                    <th className="comparative-column">
-                      <div className="header-content">
-                        <span className="header-icon">📊</span>
-                        <span>2024</span>
-                      </div>
-                    </th>
-                    <th className="comparative-column">
-                      <div className="header-content">
-                        <span className="header-icon">📈</span>
-                        <span>2025</span>
-                      </div>
-                    </th>
-                    <th className="percentage-column">
-                      <div className="header-content">
-                        <span className="header-icon">📈</span>
-                        <span>Participação</span>
-                      </div>
-                    </th>
-                    <th className="trend-column">
-                      <div className="header-content">
-                        <span className="header-icon">🔄</span>
-                        <span>Variação</span>
-                      </div>
-                    </th>
-                  </>
-                ) : (
-                  <>
-                    <th className="quantity-column">
-                      <div className="header-content">
-                        <span className="header-icon">📊</span>
-                        <span>Quantidade</span>
-                      </div>
-                    </th>
-                    <th className="percentage-column">
-                      <div className="header-content">
-                        <span className="header-icon">📈</span>
-                        <span>Participação</span>
-                      </div>
-                    </th>
-                    <th className="trend-column">
-                      <div className="header-content">
-                        <span className="header-icon">📈</span>
-                        <span>Tendência</span>
-                      </div>
-                    </th>
-                  </>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {safeFilter(chartData.distribution, (item) => !safeStringCheck(item.tipo, 'design')).map((item, index) => {
-                const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
-                const color = colors[index % colors.length];
+                    {/* Páginas numeradas */}
+                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                      let pageNum;
+                      if (totalPages <= 5) {
+                        pageNum = i + 1;
+                      } else if (currentPage <= 3) {
+                        pageNum = i + 1;
+                      } else if (currentPage >= totalPages - 2) {
+                        pageNum = totalPages - 4 + i;
+                      } else {
+                        pageNum = currentPage - 2 + i;
+                      }
 
-                const tipoSeguro = item.tipo || 'Tipo não definido';
+                      return (
+                        <button
+                          key={pageNum}
+                          onClick={() => handlePageChange(pageNum)}
+                          style={{
+                            padding: '6px 12px',
+                            border: '1px solid #D1D5DB',
+                            borderRadius: '6px',
+                            background: currentPage === pageNum ? '#FF6B47' : '#FFF',
+                            color: currentPage === pageNum ? '#FFF' : '#374151',
+                            cursor: 'pointer',
+                            fontSize: '0.9rem',
+                            fontWeight: '500',
+                            minWidth: '40px'
+                          }}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
 
-                const media2024 = item.media2024 || (item.valor2024 ? item.valor2024 / 12 : 0);
-                const media2025 = item.media2025 || (item.valor2025 ? item.valor2025 / 6 : item.valor ? item.valor / 6 : 0);
-
-                const totalMedia2024 = safeFilter(chartData.distribution, (i) => !safeStringCheck(i.tipo, 'design')).reduce(
-                  (sum, i) => sum + (i.media2024 || (i.valor2024 ? i.valor2024 / 12 : 0)),
-                  0
-                );
-                const totalMedia2025 = safeFilter(chartData.distribution, (i) => !safeStringCheck(i.tipo, 'design')).reduce(
-                  (sum, i) => sum + (i.media2025 || (i.valor2025 ? i.valor2025 / 6 : i.valor ? i.valor / 6 : 0)),
-                  0
-                );
-
-                const percentual2024 = totalMedia2024 > 0 ? Math.round((media2024 / totalMedia2024) * 100) : 0;
-                const percentual2025 = totalMedia2025 > 0 ? Math.round((media2025 / totalMedia2025) * 100) : 0;
-                const variacao = media2024 > 0 ? Math.round(((media2025 - media2024) / media2024) * 100) : 0;
-
-                return (
-                  <tr key={tipoSeguro} className="table-row">
-                    <td className="type-cell">
-                      <div className="type-content">
-                        <div className="type-indicator" style={{ backgroundColor: color }} />
-                        <div className="type-info">
-                          <span className="type-name">{tipoSeguro}</span>
-                          <span className="type-description">
-                            {tipoSeguro === 'Relatórios Gerais' && 'Análises principais'}
-                            {tipoSeguro === 'Semanais' && 'Monitoramento semanal'}
-                            {tipoSeguro === 'Mensais' && 'Relatórios mensais'}
-                            {tipoSeguro === 'Especiais' && 'Projetos especiais'}
-                            {tipoSeguro === 'Diagnósticos' && 'Análises diagnósticas'}
-                          </span>
-                        </div>
-                      </div>
-                    </td>
-
-                    {filters.periodo === 'ambos' ? (
-                      <>
-                        <td className="comparative-cell">
-                          <div className="comparative-content">
-                            <div className="comparative-bar-container">
-                              <div
-                                className="comparative-bar year-2024"
-                                style={{ width: `${percentual2024}%`, backgroundColor: '#6B7280' }}
-                              />
-                            </div>
-                            <div className="comparative-details">
-                              <span className="comparative-value">{media2024.toFixed(1)}</span>
-                              <span className="comparative-label">rel/mês</span>
-                              <span className="comparative-percentage">{percentual2024}%</span>
-                            </div>
-                          </div>
-                        </td>
-
-                        <td className="comparative-cell">
-                          <div className="comparative-content highlighted">
-                            <div className="comparative-bar-container">
-                              <div className="comparative-bar year-2025" style={{ width: `${percentual2025}%`, backgroundColor: color }} />
-                            </div>
-                            <div className="comparative-details">
-                              <span className="comparative-value">{media2025.toFixed(1)}</span>
-                              <span className="comparative-label">rel/mês</span>
-                              <span className="comparative-percentage">{percentual2025}%</span>
-                            </div>
-                          </div>
-                        </td>
-
-                        <td className="percentage-cell">
-                          <div className="percentage-comparison">
-                            <div className="comparison-bars">
-                              <div className="comparison-bar-item">
-                                <span className="comparison-year">2024</span>
-                                <div className="comparison-bar-bg">
-                                  <div className="comparison-bar" style={{ width: `${percentual2024}%`, backgroundColor: '#E5E7EB' }} />
-                                </div>
-                                <span className="comparison-percent">{percentual2024}%</span>
-                              </div>
-                              <div className="comparison-bar-item">
-                                <span className="comparison-year">2025</span>
-                                <div className="comparison-bar-bg">
-                                  <div className="comparison-bar" style={{ width: `${percentual2025}%`, backgroundColor: color }} />
-                                </div>
-                                <span className="comparison-percent">{percentual2025}%</span>
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-
-                        <td className="trend-cell">
-                          <div className="trend-content">
-                            <div
-                              className={`variation-badge-professional ${
-                                variacao > 0 ? 'positive' : variacao < 0 ? 'negative' : 'neutral'
-                              }`}
-                            >
-                              <span className="variation-icon">{variacao > 0 ? '📈' : variacao < 0 ? '📉' : '➖'}</span>
-                              <span className="variation-value">{variacao > 0 ? '+' : ''}{variacao}%</span>
-                            </div>
-                            <span className="variation-description">
-                              {variacao > 0 ? 'Crescimento na média mensal' : variacao < 0 ? 'Redução na média mensal' : 'Média estável'}
-                            </span>
-                          </div>
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td className="quantity-cell">
-                          <div className="quantity-content">
-                            <span className="quantity-number">{(item.valor || 0).toLocaleString('pt-BR')}</span>
-                            <span className="quantity-label">total</span>
-                            <span className="quantity-average">{((item.valor || 0) / 6).toFixed(1)} rel/mês</span>
-                          </div>
-                        </td>
-
-                        <td className="percentage-cell">
-                          <div className="percentage-content">
-                            <div className="percentage-bar-container">
-                              <div className="percentage-bar" style={{ width: `${percentual2025}%`, backgroundColor: color }} />
-                            </div>
-                            <span className="percentage-text">{percentual2025}%</span>
-                          </div>
-                        </td>
-
-                        <td className="trend-cell">
-                          <div className="trend-content">
-                            <span className={`trend-indicator ${(item.valor || 0) > 0 ? 'positive' : 'neutral'}`}>
-                              {(item.valor || 0) > 0 ? '🟢' : '⚪'}
-                            </span>
-                            <span className="trend-text">{(item.valor || 0) > 0 ? 'Ativo' : 'Inativo'}</span>
-                          </div>
-                        </td>
-                      </>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                    <button
+                      onClick={() => handlePageChange(currentPage + 1)}
+                      disabled={currentPage === totalPages}
+                      style={{
+                        padding: '6px 12px',
+                        border: '1px solid #D1D5DB',
+                        borderRadius: '6px',
+                        background: currentPage === totalPages ? '#F3F4F6' : '#FFF',
+                        color: currentPage === totalPages ? '#9CA3AF' : '#374151',
+                        cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+                        fontSize: '0.9rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      »
+                    </button>
+                    
+                    <button
+                      onClick={() => handlePageChange(totalPages)}
+                      disabled={currentPage === totalPages}
+                      style={{
+                        padding: '6px 12px',
+                        border: '1px solid #D1D5DB',
+                        borderRadius: '6px',
+                        background: currentPage === totalPages ? '#F3F4F6' : '#FFF',
+                        color: currentPage === totalPages ? '#9CA3AF' : '#374151',
+                        cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+                        fontSize: '0.9rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      »»
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         {/* Insights da distribuição */}
         <div className="distribution-insights">
           <div className="insights-grid">
-            {filters.periodo === 'ambos' ? (
-              <>
-                <div className="insight-card">
-                  <span className="insight-icon">📊</span>
-                  <div className="insight-content">
-                    <span className="insight-label">Média Mensal 2024</span>
-                    <span className="insight-value">
-                      {safeFilter(chartData.distribution, (item) => !safeStringCheck(item.tipo, 'design'))
-                        .reduce((sum, item) => sum + (item.media2024 || (item.valor2024 ? item.valor2024 / 12 : 0)), 0)
-                        .toFixed(1)} rel/mês
-                    </span>
-                  </div>
-                </div>
+            <div className="insight-card">
+              <span className="insight-icon">📊</span>
+              <div className="insight-content">
+                <span className="insight-label">Total de Tipos Únicos</span>
+                <span className="insight-value">
+                  {chartData.distribution?.length || 0}
+                </span>
+              </div>
+            </div>
 
-                <div className="insight-card">
-                  <span className="insight-icon">📈</span>
-                  <div className="insight-content">
-                    <span className="insight-label">Média Mensal 2025</span>
-                    <span className="insight-value">
-                      {safeFilter(chartData.distribution, (item) => !safeStringCheck(item.tipo, 'design'))
-                        .reduce((sum, item) => sum + (item.media2025 || (item.valor2025 ? item.valor2025 / 6 : item.valor ? item.valor / 6 : 0)), 0)
-                        .toFixed(1)} rel/mês
-                    </span>
-                  </div>
-                </div>
+            <div className="insight-card">
+              <span className="insight-icon">🏆</span>
+              <div className="insight-content">
+                <span className="insight-label">Tipo Mais Realizado</span>
+                <span className="insight-value">
+                  {chartData.distribution?.[0]?.tipo || 'N/A'}
+                </span>
+              </div>
+            </div>
 
-                <div className="insight-card">
-                  <span className="insight-icon">🔄</span>
-                  <div className="insight-content">
-                    <span className="insight-label">Crescimento das Médias</span>
-                    <span className="insight-value">
-                      {(() => {
-                        const totalMedia2024 = safeFilter(chartData.distribution, (item) => !safeStringCheck(item.tipo, 'design')).reduce(
-                          (sum, item) => sum + (item.media2024 || (item.valor2024 ? item.valor2024 / 12 : 0)),
-                          0
-                        );
-                        const totalMedia2025 = safeFilter(chartData.distribution, (item) => !safeStringCheck(item.tipo, 'design')).reduce(
-                          (sum, item) => sum + (item.media2025 || (item.valor2025 ? item.valor2025 / 6 : item.valor ? item.valor / 6 : 0)),
-                          0
-                        );
-                        const crescimento =
-                          totalMedia2024 > 0 ? Math.round(((totalMedia2025 - totalMedia2024) / totalMedia2024) * 100) : 0;
-                        return crescimento > 0 ? `+${crescimento}%` : `${crescimento}%`;
-                      })()}
-                    </span>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="insight-card">
-                  <span className="insight-icon">📊</span>
-                  <div className="insight-content">
-                    <span className="insight-label">Total de Tipos</span>
-                    <span className="insight-value">
-                      {safeFilter(chartData.distribution, (item) => !safeStringCheck(item.tipo, 'design')).length}
-                    </span>
-                  </div>
-                </div>
+            <div className="insight-card">
+              <span className="insight-icon">📈</span>
+              <div className="insight-content">
+                <span className="insight-label">Total de Demandas</span>
+                <span className="insight-value">
+                  {chartData.distribution?.reduce((sum, item) => sum + (item.quantidade || 0), 0).toLocaleString('pt-BR') || 0}
+                </span>
+              </div>
+            </div>
 
-                <div className="insight-card">
-                  <span className="insight-icon">⚡</span>
-                  <div className="insight-content">
-                    <span className="insight-label">Tipos Ativos</span>
-                    <span className="insight-value">
-                      {
-                        safeFilter(chartData.distribution, (item) => !safeStringCheck(item.tipo, 'design')).filter(
-                          (item) => (item.valor || 0) > 0
-                        ).length
-                      }
-                    </span>
-                  </div>
-                </div>
-
-                <div className="insight-card">
-                  <span className="insight-icon">📈</span>
-                  <div className="insight-content">
-                    <span className="insight-label">Produção Total</span>
-                    <span className="insight-value">
-                      {safeFilter(chartData.distribution, (item) => !safeStringCheck(item.tipo, 'design'))
-                        .reduce((sum, item) => sum + (item.valor || 0), 0)
-                        .toLocaleString('pt-BR')}
-                    </span>
-                  </div>
-                </div>
-              </>
-            )}
+            <div className="insight-card">
+              <span className="insight-icon">⚡</span>
+              <div className="insight-content">
+                <span className="insight-label">Top 3 Representa</span>
+                <span className="insight-value">
+                  {(() => {
+                    const top3 = chartData.distribution?.slice(0, 3) || [];
+                    const totalTop3 = top3.reduce((sum, item) => sum + (item.porcentagem || 0), 0);
+                    return `${totalTop3}%`;
+                  })()}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Gráfico Mensal Detalhado */}
-      {filters.periodo === 'ambos' && chartData.monthlyDetailed && chartData.monthlyDetailed.length > 0 && (
+      {/* Gráfico Mensal Detalhado - COMENTADO */}
+      {/* {filters.periodo === 'ambos' && chartData.monthlyDetailed && chartData.monthlyDetailed.length > 0 && (
         <div className="charts-row modern">
           <div className="chart-col-full">
             <MonthlyDetailChart
@@ -822,7 +772,7 @@ function App() {
             />
           </div>
         </div>
-      )}
+      )} */}
 
       {/* Gráfico de Produção de Design */}
       <div className="charts-row modern">
@@ -909,7 +859,7 @@ function App() {
         <div className="last-update">
           Última atualização{' '}
           {lastUpdate ? new Date(lastUpdate).toLocaleString('pt-BR') : '—'} •
-          {' '}Fonte: Google Sheets (Nova Planilha) • Auto-refresh ativo
+          {' '}Fonte: Google Sheets + Notion (Consolidado) • Auto-refresh ativo
           {error ? ` • Erro: ${error}` : ''}
         </div>
       </div>
@@ -928,7 +878,7 @@ function App() {
       {/* Loading Overlay */}
       {loading && (
         <div className="loading-overlay">
-          <div className="loading-spinner">🔄 <span>Carregando dados da nova planilha...</span></div>
+          <div className="loading-spinner">🔄 <span>Carregando dados consolidados (Sheets + Notion)...</span></div>
         </div>
       )}
 
@@ -969,7 +919,7 @@ function App() {
                   Período de Análise
                 </label>
                 <select value={filters.periodo} onChange={(e) => handleFilterChange('periodo', e.target.value)} className="filter-select modern">
-                  <option value="ambos">📊 Comparativo 2024 vs 2025</option>
+                  <option value="ambos">📊 Comparativo 2024 vs 2025 (12 meses)</option>
                   <option value="2024">📅 Apenas 2024 (Histórico)</option>
                   <option value="2025">📅 Apenas 2025 (Atual)</option>
                 </select>
@@ -1025,6 +975,7 @@ function App() {
             </div>
 
             {/* Indicador de Status dos Filtros */}
+
             <div
               style={{
                 marginTop: '16px',

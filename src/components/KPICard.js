@@ -73,7 +73,11 @@ const KPICard = ({
           <p className="kpi-subtitle">{subtitle}</p>
         </div>
         <div className="kpi-icon">
-          {icon && React.createElement(icon, { size: 28 })}
+          {icon && (
+            <div className="kpi-icon-circle">
+              {React.createElement(icon, { size: 24 })}
+            </div>
+          )}
           {trendData && (
             <div 
               className="kpi-trend" 

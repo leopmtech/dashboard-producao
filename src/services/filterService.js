@@ -113,17 +113,25 @@ export class FilterService {
       
       if (order.isAtrasado) stats.atrasados++;
 
-      // Distribuir por ano e mês
+      // Distribuir por ano e mês - apenas para datas até a data atual
       if (order.dataEntregaDate) {
-        const year = order.dataEntregaDate.getFullYear();
-        if (year === 2024) stats['2024']++;
-        if (year === 2025) stats['2025']++;
-
-        const month = order.dataEntregaDate.getMonth();
-        const monthNames = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho',
-                           'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
-        if (monthNames[month]) {
-          stats[monthNames[month]]++;
+        // Verificar se a data de entrega não é futura
+        const currentDate = new Date();
+        // Resetar horas para comparação apenas de data
+        currentDate.setHours(0, 0, 0, 0);
+        
+        // Só processar se a data de entrega for menor ou igual à data atual
+        if (order.dataEntregaDate <= currentDate) {
+          const year = order.dataEntregaDate.getFullYear();
+          if (year === 2024) stats['2024']++;
+          if (year === 2025) stats['2025']++;
+  
+          const month = order.dataEntregaDate.getMonth();
+          const monthNames = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho',
+                             'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+          if (monthNames[month]) {
+            stats[monthNames[month]]++;
+          }
         }
       }
     });

@@ -4,7 +4,7 @@
 // ==========================================
 
 import React, { useState, useMemo } from 'react';
-import { ZoomIn, TrendingUp, Calendar, Users, Filter } from 'lucide-react';
+import { ZoomIn, Filter } from 'lucide-react';
 
 const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção" }) => {
   const [selectedClient, setSelectedClient] = useState(null);
@@ -31,15 +31,24 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
     const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
     const monthKeys = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
     
-    // Coletar clientes de todos os anos selecionados
+    // Obter o mês atual (0-11)
+    const currentDate = new Date();
+    const currentMonth = currentDate.getMonth();
+    const currentYear = currentDate.getFullYear();
+    
+    // Usar todos os meses para manter a estrutura visual da tabela
+    const filteredMonths = months;
+    const filteredMonthKeys = monthKeys;
+    
+    // Usar dados processados (visaoGeral) que já estão funcionando
     const allClients = new Set();
     
     if (selectedYears.includes('2025') && data.visaoGeral) {
-      data.visaoGeral.forEach(client => allClients.add(client.cliente));
+      data.visaoGeral.forEach(client => client?.cliente && allClients.add(client.cliente));
     }
     
     if (selectedYears.includes('2024') && data.visaoGeral2024) {
-      data.visaoGeral2024.forEach(client => allClients.add(client.cliente));
+      data.visaoGeral2024.forEach(client => client?.cliente && allClients.add(client.cliente));
     }
 
     const clients = Array.from(allClients).sort();
@@ -48,7 +57,7 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
     let maxValue = 0;
     let totalSum = 0;
     
-    // Função para obter dados do cliente por ano
+    // Função para obter dados do cliente por ano (usando dados processados)
     const getClientData = (clientName, year) => {
       if (year === '2025' && data.visaoGeral) {
         return data.visaoGeral.find(c => c.cliente === clientName) || {};
@@ -63,7 +72,7 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
     selectedYears.forEach(year => {
       clients.forEach(clientName => {
         const clientData = getClientData(clientName, year);
-        monthKeys.forEach(monthKey => {
+        filteredMonthKeys.forEach(monthKey => {
           const value = clientData[monthKey] || 0;
           maxValue = Math.max(maxValue, value);
           totalSum += value;
@@ -73,8 +82,8 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
 
     // Construir matriz com dados multi-ano
     const matrix = clients.map(clientName => {
-      return months.map((month, monthIndex) => {
-        const monthKey = monthKeys[monthIndex];
+      return filteredMonths.map((month, monthIndex) => {
+        const monthKey = filteredMonthKeys[monthIndex];
         
         // Coletar dados de todos os anos selecionados
         const yearData = {};
@@ -115,13 +124,17 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
                                 selectedYears.includes('2024') && 
                                 data.visaoGeral?.some(c => c.cliente === clientName) &&
                                 !data.visaoGeral2024?.some(c => c.cliente === clientName);
+                                
+        // Verificar se o mês é futuro (para não mostrar dados futuros)
+        const isFutureMonth = (currentYear === 2025 && monthIndex > currentMonth) || 
+                             (currentYear > 2025);
 
         return {
           client: clientName,
           month: month,
           monthIndex,
-          value: totalValue,
-          displayValue: displayValue,
+          value: isFutureMonth ? 0 : totalValue, // Zero para meses futuros
+          displayValue: isFutureMonth ? 0 : displayValue, // Zero para meses futuros
           intensity: intensity,
           yearData: yearData, // Dados separados por ano
           isSelected: selectedClient === clientName || selectedMonth === month,
@@ -133,7 +146,16 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
       });
     });
 
-    return { clients, months, matrix, maxValue, totalSum };
+    console.log('🗺️ [HEATMAP] Dados processados:', {
+      clientsCount: clients.length,
+      maxValue,
+      totalSum,
+      matrixCells: matrix.length * (matrix[0]?.length || 0),
+      sampleClient: clients[0] || 'N/A',
+      sampleData: matrix[0]?.[0] || null
+    });
+
+    return { clients, months: filteredMonths, matrix, maxValue, totalSum };
   }, [data, selectedClient, selectedMonth, hoveredCell, viewMode, selectedYears]);
 
   // Obter cor da célula baseada na intensidade e contexto
@@ -838,7 +860,7 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
       )}
 
       {/* Resumo dos Novos Clientes */}
-      {selectedYears.includes('2025') && selectedYears.includes('2024') && data.visaoGeral && data.visaoGeral2024 && (
+      {selectedYears.includes('2025') && selectedYears.includes('2024') && data?.visaoGeral && data?.visaoGeral2024 && (
         <div style={{
           marginTop: '24px',
           padding: '16px',
@@ -859,7 +881,7 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
             const clientes2024 = data.visaoGeral2024.map(c => c.cliente);
             const clientes2025 = data.visaoGeral.map(c => c.cliente);
             const novos = clientes2025.filter(c => !clientes2024.includes(c));
-            const saíram = clientes2024.filter(c => !clientes2025.includes(c));
+            const sairam = clientes2024.filter(c => !clientes2025.includes(c));
 
             return (
               <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
@@ -874,10 +896,10 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
                 
                 <div>
                   <div style={{ fontSize: '0.875rem', color: '#DC2626', fontWeight: '600', marginBottom: '4px' }}>
-                    ⚠️ Clientes que Saíram ({saíram.length}):
+                    ⚠️ Clientes que Saíram ({sairam.length}):
                   </div>
                   <div style={{ fontSize: '0.75rem', color: '#6B7280' }}>
-                    {saíram.length > 0 ? saíram.join(', ') : 'Nenhum'}
+                    {sairam.length > 0 ? sairam.join(', ') : 'Nenhum'}
                   </div>
                 </div>
               </div>

@@ -480,13 +480,21 @@ escolherVersaoPreferida(versaoA, versaoB) {
       if (order.isAtrasado) stats.atrasados += 1;
 
       if (order.dataEntregaDate) {
-        const y = order.dataEntregaDate.getFullYear();
-        if (y === 2024) stats['2024'] += 1;
-        if (y === 2025) stats['2025'] += 1;
-
-        const m = order.dataEntregaDate.getMonth();
-        const key = monthNames[m];
-        if (key) stats[key] += 1;
+        // Verificar se a data de entrega não é futura
+        const currentDate = new Date();
+        // Resetar horas para comparação apenas de data
+        currentDate.setHours(0, 0, 0, 0);
+        
+        // Só processar se a data de entrega for menor ou igual à data atual
+        if (order.dataEntregaDate <= currentDate) {
+          const y = order.dataEntregaDate.getFullYear();
+          if (y === 2024) stats['2024'] += 1;
+          if (y === 2025) stats['2025'] += 1;
+  
+          const m = order.dataEntregaDate.getMonth();
+          const key = monthNames[m];
+          if (key) stats[key] += 1;
+        }
       }
     });
 

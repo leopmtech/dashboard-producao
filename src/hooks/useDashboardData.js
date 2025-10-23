@@ -1,14 +1,96 @@
 // ==========================================
-// src/hooks/useDashboardData.js - COEXISTÊNCIA NOTION + SHEETS (AJUSTADO)
+// src/hooks/useDashboardData.js - CORRIGIDO COM MARCAÇÃO DE FONTES
 // ==========================================
 
 import { useState, useEffect, useCallback } from 'react';
-import notionService from '../services/notionService';          // ✅ mantém apenas um
+import notionService from '../services/notionService';
 import googleSheetsService from '../services/googleSheetsService';
 import { DataProcessingService } from '../services/dataProcessingService';
 
 // --- Helpers de merge --- //
 const sumSafe = (a = 0, b = 0) => (Number(a) || 0) + (Number(b) || 0);
+
+// ✅ NOVA FUNÇÃO: Prepara dados de tendência com todos os 12 meses
+const prepareTrendData = (rawData, currentYear = new Date().getFullYear()) => {
+  const allMonths = [
+    'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+  ];
+
+  const monthsMap = {
+    'janeiro': 'Janeiro', 'fevereiro': 'Fevereiro', 'marco': 'Março', 'março': 'Março',
+    'abril': 'Abril', 'maio': 'Maio', 'junho': 'Junho', 'julho': 'Julho',
+    'agosto': 'Agosto', 'setembro': 'Setembro', 'outubro': 'Outubro',
+    'novembro': 'Novembro', 'dezembro': 'Dezembro'
+  };
+
+  // Processar dados de visaoGeral para criar dados mensais
+  const monthlyTotals = {};
+  
+  if (rawData && rawData.visaoGeral && Array.isArray(rawData.visaoGeral)) {
+    // Inicializar todos os meses com 0
+    allMonths.forEach(month => {
+      monthlyTotals[month] = 0;
+    });
+
+    // Somar os valores de todos os clientes por mês
+    rawData.visaoGeral.forEach(cliente => {
+      Object.keys(monthsMap).forEach(key => {
+        if (cliente[key] && typeof cliente[key] === 'number') {
+          const monthName = monthsMap[key];
+          monthlyTotals[monthName] += cliente[key];
+        }
+      });
+    });
+  } else {
+    // Se não há dados, inicializar todos com 0
+    allMonths.forEach(month => {
+      monthlyTotals[month] = 0;
+    });
+  }
+
+  // Criar estrutura final com todos os 12 meses
+  const fullYearData = allMonths.map((month, index) => {
+    const monthNumber = index + 1;
+    const current = monthlyTotals[month] || 0;
+
+    return {
+      month,
+      monthNumber,
+      current,
+      previous: 0, // Será calculado abaixo
+      growth: 0,   // Será calculado abaixo
+      date: `${currentYear}-${monthNumber.toString().padStart(2, '0')}-01`
+    };
+  });
+
+  // Calcular comparações com mês anterior
+  fullYearData.forEach((item, index) => {
+    if (index > 0) {
+      const previousMonth = fullYearData[index - 1];
+      item.previous = previousMonth.current;
+      
+      // Calcular crescimento percentual
+      if (previousMonth.current > 0) {
+        item.growth = ((item.current - previousMonth.current) / previousMonth.current) * 100;
+      } else {
+        item.growth = item.current > 0 ? 100 : 0;
+      }
+    } else {
+      // Para janeiro, não há mês anterior no ano atual
+      item.previous = 0;
+      item.growth = 0;
+    }
+  });
+
+  console.log('📊 [TREND] Dados de tendência processados:', {
+    totalMeses: fullYearData.length,
+    mesesComDados: fullYearData.filter(m => m.current > 0).length,
+    primeiros5: fullYearData.slice(0, 5).map(m => ({ mes: m.month, valor: m.current }))
+  });
+
+  return fullYearData;
+};
 
 // Soma por cliente e meses (janeiro...dezembro), mantendo totais/coerência
 function mergeClientsArrays(a = [], b = []) {
@@ -271,6 +353,24 @@ const useDashboardData = () => {
       let notionData = (notionRes.status === 'fulfilled') ? notionRes.value : null;
       let sheetsData = (sheetsRes.status === 'fulfilled') ? sheetsRes.value : null;
 
+      // 🆕 CONSOLIDAÇÃO COM MARCAÇÃO DE FONTES
+      console.log('🔄 [DATA CONSOLIDATION] Aplicando consolidação com marcação de fontes...');
+      
+      // Preparar dados brutos para consolidação
+      const sheetsRawData = sheetsData?.originalOrders || [];
+      const notionRawData = notionData?.originalOrders || [];
+      
+      // Aplicar consolidação do DataProcessingService
+      const consolidatedRawData = DataProcessingService.consolidateAndNormalize(sheetsRawData, notionRawData);
+      
+      console.log('✅ [CONSOLIDATED RAW] Dados brutos consolidados:', {
+        total: consolidatedRawData?.length || 0,
+        porFonte: {
+          sheets: consolidatedRawData?.filter(item => item._source === 'sheets')?.length || 0,
+          notion: consolidatedRawData?.filter(item => item._source === 'notion')?.length || 0
+        }
+      });
+
       // Atualiza status de fontes
       setSourceStatus({
         notionOk: !!(notionData && notionData.visaoGeral),
@@ -294,11 +394,27 @@ const useDashboardData = () => {
         sheetsData?.originalOrders || []
       );
 
+      // 🆕 MARCAR originalOrders COM FONTE
+      const originalOrdersMarked = originalOrdersMerged.map((order, index) => ({
+        ...order,
+        _source: order._source || 'sheets', // Assume sheets se não marcado
+        _id: order._id || `order_${index}`,
+        _originalIndex: index
+      }));
+
       // Mesclar visaoGeral por cliente somando campos
       const visaoGeralMerged = mergeClientsArrays(
         notionData?.visaoGeral || [],
         sheetsData?.visaoGeral || []
       );
+
+      // 🆕 MARCAR visaoGeral COM FONTE
+      const visaoGeralMarked = visaoGeralMerged.map((cliente, index) => ({
+        ...cliente,
+        _source: 'processed', // Dados processados (merge)
+        _id: `client_${index}`,
+        _originalIndex: index
+      }));
 
       // Unir contentTypes
       const contentTypesMerged = dedupeContentTypes(
@@ -306,31 +422,51 @@ const useDashboardData = () => {
         sheetsData?.contentTypes || []
       );
 
+      // ✅ PROCESSAR DADOS DE TENDÊNCIA COM TODOS OS 12 MESES
+      const trendDataProcessed = prepareTrendData({ visaoGeral: visaoGeralMerged });
+
       // Montar payload final no shape usado pelo App
       const merged = {
         ...baseMerged, // inclui outras coleções que porventura seu app use
         totalSheets: (notionData ? 1 : 0) + (sheetsData ? 1 : 0),
         loadedAt: new Date().toISOString(),
         sheetName: 'notion+sheets',
-        originalOrders: originalOrdersMerged,
+        
+        // 🆕 DADOS PRINCIPAIS COM MARCAÇÃO DE FONTE
+        originalOrders: originalOrdersMarked,
+        _consolidatedSource: consolidatedRawData, // Para o indicador no App.js
+        
         metrics: notionData?.metrics || sheetsData?.metrics || {},
         contentTypes: contentTypesMerged,
 
-        // Coleções principais padronizadas
-        visaoGeral: visaoGeralMerged,
-        visaoGeral2024: visaoGeralMerged.filter(c => (c['2024'] || 0) > 0),
-        diarios: visaoGeralMerged,
-        diarios2024: visaoGeralMerged.filter(c => (c['2024'] || 0) > 0),
-        semanais: visaoGeralMerged,
-        semanais2024: visaoGeralMerged.filter(c => (c['2024'] || 0) > 0),
-        mensais: visaoGeralMerged,
-        mensais2024: visaoGeralMerged.filter(c => (c['2024'] || 0) > 0),
-        especiais: visaoGeralMerged,
-        especiais2024: visaoGeralMerged.filter(c => (c['2024'] || 0) > 0),
-        diagnosticos: visaoGeralMerged,
-        diagnosticos2024: visaoGeralMerged.filter(c => (c['2024'] || 0) > 0),
-        design: visaoGeralMerged
+        // ✅ ADICIONANDO DADOS DE TENDÊNCIA PROCESSADOS
+        trend: trendDataProcessed,
+
+        // Coleções principais padronizadas COM MARCAÇÃO
+        visaoGeral: visaoGeralMarked,
+        visaoGeral2024: visaoGeralMarked.filter(c => (c['2024'] || 0) > 0),
+        diarios: visaoGeralMarked,
+        diarios2024: visaoGeralMarked.filter(c => (c['2024'] || 0) > 0),
+        semanais: visaoGeralMarked,
+        semanais2024: visaoGeralMarked.filter(c => (c['2024'] || 0) > 0),
+        mensais: visaoGeralMarked,
+        mensais2024: visaoGeralMarked.filter(c => (c['2024'] || 0) > 0),
+        especiais: visaoGeralMarked,
+        especiais2024: visaoGeralMarked.filter(c => (c['2024'] || 0) > 0),
+        diagnosticos: visaoGeralMarked,
+        diagnosticos2024: visaoGeralMarked.filter(c => (c['2024'] || 0) > 0),
+        design: visaoGeralMarked
       };
+
+      console.log('🎉 [SUCCESS] Dados consolidados e marcados:', {
+        consolidatedSource: merged._consolidatedSource?.length || 0,
+        originalOrders: merged.originalOrders?.length || 0,
+        visaoGeral: merged.visaoGeral?.length || 0,
+        fontes: {
+          sheets: merged._consolidatedSource?.filter(item => item._source === 'sheets')?.length || 0,
+          notion: merged._consolidatedSource?.filter(item => item._source === 'notion')?.length || 0
+        }
+      });
 
       setRawData(merged);
       setData(merged);
@@ -359,11 +495,18 @@ const useDashboardData = () => {
       const filtered = DataProcessingService.applyAdvancedFilters
         ? DataProcessingService.applyAdvancedFilters(data, activeFilters)
         : data;
+      
+      // ✅ REPROCESSAR TREND DATA PARA DADOS FILTRADOS
+      if (filtered && filtered.visaoGeral) {
+        filtered.trend = prepareTrendData(filtered);
+      }
+      
       setFilteredData(filtered);
       console.log('🔍 Filtros aplicados:', {
         filtros: activeFilters,
         ordens: filtered?.originalOrders?.length || 0,
         clientes: filtered?.visaoGeral?.length || 0,
+        trendMeses: filtered?.trend?.length || 0,
         fonte: data?.sheetName || 'desconhecida',
       });
     } catch (e) {
@@ -415,7 +558,13 @@ const useDashboardData = () => {
         Marco: cliente.marco || 0,
         Abril: cliente.abril || 0,
         Maio: cliente.maio || 0,
-        Junho: cliente.junho || 0
+        Junho: cliente.junho || 0,
+        Julho: cliente.julho || 0,
+        Agosto: cliente.agosto || 0,
+        Setembro: cliente.setembro || 0,
+        Outubro: cliente.outubro || 0,
+        Novembro: cliente.novembro || 0,
+        Dezembro: cliente.dezembro || 0
       }));
 
       const header = Object.keys(csvData[0] || {}).join(',');

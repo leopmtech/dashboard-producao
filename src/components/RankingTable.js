@@ -1,23 +1,77 @@
 // ==========================================
-// src/components/RankingTable.jsx
-// Ranking com coluna extra "🧾 Demandas"
+// src/components/RankingTable.js
+// Ranking com coluna extra "🧾 Demandas" + Paginação + Cálculo de médias robusto
 // ==========================================
 import React from 'react';
 
-const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = null, totalUniqueClients = null }) => {
-  console.log('📋 [RANKING TABLE v2] Dados recebidos:', {
+const MONTH_KEYS = [
+  'janeiro','fevereiro','marco','abril','maio','junho',
+  'julho','agosto','setembro','outubro','novembro','dezembro'
+];
+
+/** Conta meses com dado (>0) dentro de um item (caso ele traga os meses) */
+function inferMesesValidosPorItem(item) {
+  try {
+    const hasMonthKeys = MONTH_KEYS.some(k => k in (item || {}));
+    if (!hasMonthKeys) return 0;
+    return MONTH_KEYS.reduce((acc, k) => acc + ((item?.[k] || 0) > 0 ? 1 : 0), 0);
+  } catch {
+    return 0;
+  }
+}
+
+/** Conta meses com dado (>0) no dataset inteiro (se houver colunas mensais nos itens) */
+function inferMesesValidosGlobal(data = []) {
+  try {
+    if (!Array.isArray(data) || data.length === 0) return 0;
+    return MONTH_KEYS.reduce((acc, k) => {
+      const hasAny = data.some(d => (d?.[k] || 0) > 0);
+      return acc + (hasAny ? 1 : 0);
+    }, 0);
+  } catch {
+    return 0;
+  }
+}
+
+/** Fallback seguro para calcular média mensal quando não vier pronta */
+function calcularMediaMensalFallback(item, total, dataset) {
+  // Prioriza metadados caso já venham no item
+  const metaMeses = item?.mesesComDados || item?._meses || item?.divisorMeses || 0;
+  let meses = Number(metaMeses) || inferMesesValidosPorItem(item) || inferMesesValidosGlobal(dataset);
+  if (!meses || meses <= 0) meses = 5; // fallback final para compat com UI existente
+  return total > 0 ? Math.round((total / meses) * 10) / 10 : 0;
+}
+
+const RankingTable = ({
+  data,
+  title,
+  subtitle,
+  dataKey = "media2025",
+  orders = null,
+  totalUniqueClients = null,
+  pageSize = 10,            // ✅ paginação configurável
+  initialPage = 1           // ✅ permite iniciar em outra página
+}) => {
+  console.log('📋 [RANKING TABLE v3] Dados recebidos:', {
     length: data?.length || 0,
     dataKey,
     orders: Array.isArray(orders) ? orders.length : '—',
-    totalUniqueClients
+    totalUniqueClients,
+    pageSize
   });
 
+  const [currentPage, setCurrentPage] = React.useState(initialPage);
+  const [activeTab, setActiveTab] = React.useState('todos'); // Nova aba ativa
+
+  // Empresas do grupo - exatamente essas 4 empresas únicas
+  const empresasGrupo = ['Inpacto', 'STA', 'Listening', 'Holding'];
+  
   // Mapa Cliente -> nº de demandas a partir das ordens originais
   const demandasPorCliente = React.useMemo(() => {
     if (!orders || !Array.isArray(orders)) return null;
     const map = {};
     for (const o of orders) {
-      const nome = (o?.cliente1 || '').trim();
+      const nome = (o?.cliente1 || o?.cliente || '').trim();
       if (!nome) continue;
       map[nome] = (map[nome] || 0) + 1;
     }
@@ -31,50 +85,100 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = n
       return [];
     }
 
-    const processed = data.map((item, index) => {
+    // Filtrar dados baseado na aba ativa
+    let filteredData = data;
+    if (activeTab === 'grupo') {
+      filteredData = data.filter(item => {
+        const clienteNome = (item.cliente || '').trim();
+        // Busca exata por nome da empresa (case-insensitive)
+        return empresasGrupo.some(empresa => 
+          clienteNome.toLowerCase() === empresa.toLowerCase()
+        );
+      });
+      
+      console.log('🏢 [EMPRESAS DO GRUPO] Filtradas:', {
+        totalOriginal: data.length,
+        filtradas: filteredData.length,
+        empresasEncontradas: filteredData.map(item => item.cliente)
+      });
+    }
+
+    const processed = filteredData.map((item, index) => {
       const clienteNome = item.cliente || `Cliente ${index + 1}`;
       // Preferir contagem vinda das ordens; se não houver, usar total agregado como fallback
       const demandas = (demandasPorCliente && demandasPorCliente[clienteNome]) ?? item.total ?? 0;
 
       if (dataKey === "media2025") {
-        const media2025 = item.media2025 || (item.total ? Math.round((item.total / 5) * 10) / 10 : 0);
-        const media2024 = item.media2024 || 0;
-        const crescimento = media2024 > 0 ? Math.round(((media2025 - media2024) / media2024) * 100) : 0;
+        // Preferir valores já processados pelo serviço
+        const media2025 =
+          typeof item.media2025 === 'number'
+            ? item.media2025
+            : calcularMediaMensalFallback(item, (item.total2025 ?? item.total ?? 0), data);
+
+        const media2024 =
+          typeof item.media2024 === 'number'
+            ? item.media2024
+            : calcularMediaMensalFallback(item, (item.total2024 ?? 0), data);
+
+        const crescimento = media2024 > 0
+          ? Math.round(((media2025 - media2024) / media2024) * 100)
+          : (media2025 > 0 ? 100 : 0);
 
         return {
           ranking: index + 1,
           cliente: clienteNome,
-          media2024,
-          media2025,
+          media2024: Number.isFinite(media2024) ? media2024 : 0,
+          media2025: Number.isFinite(media2025) ? media2025 : 0,
           crescimento,
           total2024: item.total2024 || 0,
           total2025: item.total2025 || item.total || 0,
           demandas, // 👈 nova info
         };
       } else {
-        const valor = item.total || item.valor || 0;
-        const media = item.media || (valor > 0 ? Math.round((valor / 5) * 10) / 10 : 0);
+        const valor = item.total ?? item.valor ?? 0;
+        const media =
+          typeof item.media === 'number'
+            ? item.media
+            : calcularMediaMensalFallback(item, valor, data);
 
         return {
           ranking: index + 1,
           cliente: clienteNome,
           total: valor,
-          media,
+          media: Number.isFinite(media) ? media : 0,
           valor,
           demandas, // 👈 nova info
         };
       }
     });
 
-    // Ordenar por média 2025 ou total conforme o caso
+    // Ordenar por média 2025 ou total conforme o caso (sem limite de 10!)
     const sorted = processed
       .filter(item => (dataKey === "media2025" ? item.media2025 > 0 : item.total > 0))
       .sort((a, b) => (dataKey === "media2025" ? b.media2025 - a.media2025 : b.total - a.total))
       .map((item, idx) => ({ ...item, ranking: idx + 1 }));
 
-    console.log('📋 Dados processados para tabela:', sorted);
+    console.log('📋 Dados processados para tabela:', sorted.length);
     return sorted;
-  }, [data, dataKey, demandasPorCliente]);
+  }, [data, dataKey, demandasPorCliente, activeTab]);
+
+  // Paginação
+  const totalPages = Math.max(1, Math.ceil((processedData.length || 0) / pageSize));
+  const paginatedData = React.useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    const end = start + pageSize;
+    return processedData.slice(start, end);
+  }, [processedData, currentPage, pageSize]);
+
+  React.useEffect(() => {
+    // Se a página atual ficou fora do total após filtros, volta para 1
+    if (currentPage > totalPages) setCurrentPage(1);
+  }, [totalPages, currentPage]);
+
+  React.useEffect(() => {
+    // Resetar página quando a aba muda
+    setCurrentPage(1);
+  }, [activeTab]);
 
   // Função para determinar cor baseada no crescimento
   const getGrowthColor = (crescimento) => {
@@ -125,6 +229,50 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = n
       <h3 className="chart-title">{title}</h3>
       {subtitle && <p className="chart-subtitle">{subtitle}</p>}
 
+      {/* Sistema de Abas */}
+      <div style={{
+        display: 'flex',
+        gap: '8px',
+        marginBottom: '20px',
+        borderBottom: '2px solid #E2E8F0',
+        paddingBottom: '12px'
+      }}>
+        <button
+          onClick={() => setActiveTab('todos')}
+          style={{
+            padding: '10px 20px',
+            border: 'none',
+            borderRadius: '8px 8px 0 0',
+            background: activeTab === 'todos' ? '#FF6B47' : '#F8FAFC',
+            color: activeTab === 'todos' ? 'white' : '#6B7280',
+            fontWeight: '600',
+            cursor: 'pointer',
+            fontSize: '0.9rem',
+            transition: 'all 0.2s ease',
+            borderBottom: activeTab === 'todos' ? '2px solid #FF6B47' : '2px solid transparent'
+          }}
+        >
+          📊 Todos os Clientes
+        </button>
+        <button
+          onClick={() => setActiveTab('grupo')}
+          style={{
+            padding: '10px 20px',
+            border: 'none',
+            borderRadius: '8px 8px 0 0',
+            background: activeTab === 'grupo' ? '#FF6B47' : '#F8FAFC',
+            color: activeTab === 'grupo' ? 'white' : '#6B7280',
+            fontWeight: '600',
+            cursor: 'pointer',
+            fontSize: '0.9rem',
+            transition: 'all 0.2s ease',
+            borderBottom: activeTab === 'grupo' ? '2px solid #FF6B47' : '2px solid transparent'
+          }}
+        >
+          🏢 Empresas do Grupo
+        </button>
+      </div>
+
       {/* Tabela de Ranking */}
       <div style={{
         overflowX: 'auto',
@@ -150,7 +298,7 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = n
                     <span style={{ fontSize: '0.75rem', opacity: '0.9' }}>(rel/mês)</span>
                   </th>
                   <th style={{ padding: '16px 12px', textAlign: 'center', fontWeight: '600' }}>
-                    �� Média 2025<br />
+                    📊 Média 2025<br />
                     <span style={{ fontSize: '0.75rem', opacity: '0.9' }}>(rel/mês)</span>
                   </th>
                   <th style={{ padding: '16px 12px', textAlign: 'center', fontWeight: '600' }}>
@@ -179,23 +327,23 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = n
           </thead>
 
           <tbody>
-            {processedData.map((item, index) => (
+            {paginatedData.map((item, index) => (
               <tr
-                key={`${item.cliente}-${index}`}
+                key={`${item.cliente}-${(currentPage - 1) * pageSize + index}`}
                 style={{
                   borderBottom: '1px solid #F1F5F9',
                   backgroundColor: index % 2 === 0 ? '#FAFBFC' : 'white',
                   transition: 'background-color 0.2s ease'
                 }}
-                onMouseEnter={(e) => (e.target.parentElement.style.backgroundColor = '#F0F9FF')}
-                onMouseLeave={(e) => (e.target.parentElement.style.backgroundColor = index % 2 === 0 ? '#FAFBFC' : 'white')}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#F0F9FF')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = index % 2 === 0 ? '#FAFBFC' : 'white')}
               >
                 <td style={{ padding: '12px', textAlign: 'center' }}>
                   <div style={{
                     width: '32px',
                     height: '32px',
                     borderRadius: '50%',
-                    backgroundColor: index < 3 ? ['#FFD700', '#C0C0C0', '#CD7F32'][index] : '#6B7280',
+                    backgroundColor: item.ranking <= 3 ? ['#FFD700', '#C0C0C0', '#CD7F32'][item.ranking - 1] : '#6B7280',
                     color: 'white',
                     display: 'flex',
                     alignItems: 'center',
@@ -214,10 +362,10 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = n
                 {dataKey === "media2025" ? (
                   <>
                     <td style={{ padding: '12px', textAlign: 'center', color: '#6B7280' }}>
-                      {item.media2024.toFixed(1)}
+                      {Number(item.media2024 || 0).toFixed(1)}
                     </td>
                     <td style={{ padding: '12px', textAlign: 'center', color: '#FF6B47', fontWeight: '600' }}>
-                      {item.media2025.toFixed(1)}
+                      {Number(item.media2025 || 0).toFixed(1)}
                     </td>
                     <td style={{ padding: '12px', textAlign: 'center' }}>
                       <div style={{
@@ -240,10 +388,10 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = n
                 ) : (
                   <>
                     <td style={{ padding: '12px', textAlign: 'center', color: '#FF6B47', fontWeight: '600' }}>
-                      {item.total.toLocaleString('pt-BR')}
+                      {Number(item.total || 0).toLocaleString('pt-BR')}
                     </td>
                     <td style={{ padding: '12px', textAlign: 'center', color: '#6B7280' }}>
-                      {item.media.toFixed(1)}
+                      {Number(item.media || 0).toFixed(1)}
                     </td>
                     {/* Célula de Demandas */}
                     <td style={{ padding: '12px', textAlign: 'center', fontWeight: 600 }}>
@@ -257,7 +405,129 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = n
         </table>
       </div>
 
-      {/* 🔧 RESUMO ESTATÍSTICO CORRIGIDO */}
+      {/* Controles de Paginação - Mesmo padrão da tabela de tipos */}
+      {totalPages > 1 && (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginTop: '16px',
+          padding: '12px 16px',
+          background: '#F8FAFC',
+          borderRadius: '8px',
+          border: '1px solid #E2E8F0'
+        }}>
+          <div style={{ color: '#64748B', fontSize: '0.9rem' }}>
+            Mostrando {((currentPage - 1) * pageSize) + 1} a {Math.min(currentPage * pageSize, processedData.length)} de {processedData.length} clientes
+          </div>
+          
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button
+              onClick={() => setCurrentPage(1)}
+              disabled={currentPage === 1}
+              style={{
+                padding: '6px 12px',
+                border: '1px solid #D1D5DB',
+                borderRadius: '6px',
+                background: currentPage === 1 ? '#F3F4F6' : '#FFF',
+                color: currentPage === 1 ? '#9CA3AF' : '#374151',
+                cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                fontSize: '0.9rem',
+                fontWeight: '500'
+              }}
+            >
+              ««
+            </button>
+            
+            <button
+              onClick={() => setCurrentPage(currentPage - 1)}
+              disabled={currentPage === 1}
+              style={{
+                padding: '6px 12px',
+                border: '1px solid #D1D5DB',
+                borderRadius: '6px',
+                background: currentPage === 1 ? '#F3F4F6' : '#FFF',
+                color: currentPage === 1 ? '#9CA3AF' : '#374151',
+                cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                fontSize: '0.9rem',
+                fontWeight: '500'
+              }}
+            >
+              «
+            </button>
+
+            {/* Páginas numeradas */}
+            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+              let pageNum;
+              if (totalPages <= 5) {
+                pageNum = i + 1;
+              } else if (currentPage <= 3) {
+                pageNum = i + 1;
+              } else if (currentPage >= totalPages - 2) {
+                pageNum = totalPages - 4 + i;
+              } else {
+                pageNum = currentPage - 2 + i;
+              }
+
+              return (
+                <button
+                  key={pageNum}
+                  onClick={() => setCurrentPage(pageNum)}
+                  style={{
+                    padding: '6px 12px',
+                    border: '1px solid #D1D5DB',
+                    borderRadius: '6px',
+                    background: currentPage === pageNum ? '#FF6B47' : '#FFF',
+                    color: currentPage === pageNum ? '#FFF' : '#374151',
+                    cursor: 'pointer',
+                    fontSize: '0.9rem',
+                    fontWeight: '500',
+                    minWidth: '40px'
+                  }}
+                >
+                  {pageNum}
+                </button>
+              );
+            })}
+
+            <button
+              onClick={() => setCurrentPage(currentPage + 1)}
+              disabled={currentPage === totalPages}
+              style={{
+                padding: '6px 12px',
+                border: '1px solid #D1D5DB',
+                borderRadius: '6px',
+                background: currentPage === totalPages ? '#F3F4F6' : '#FFF',
+                color: currentPage === totalPages ? '#9CA3AF' : '#374151',
+                cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+                fontSize: '0.9rem',
+                fontWeight: '500'
+              }}
+            >
+              »
+            </button>
+            
+            <button
+              onClick={() => setCurrentPage(totalPages)}
+              disabled={currentPage === totalPages}
+              style={{
+                padding: '6px 12px',
+                border: '1px solid #D1D5DB',
+                borderRadius: '6px',
+                background: currentPage === totalPages ? '#F3F4F6' : '#FFF',
+                color: currentPage === totalPages ? '#9CA3AF' : '#374151',
+                cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+                fontSize: '0.9rem',
+                fontWeight: '500'
+              }}
+            >
+              »»
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 🔧 RESUMO ESTATÍSTICO */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
@@ -272,7 +542,7 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = n
           textAlign: 'center'
         }}>
           <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#FF6B47' }}>
-            {totalUniqueClients || processedData.length}  {/* 🔧 CORRIGIDO - usa prop consistente */}
+            {totalUniqueClients || processedData.length}
           </div>
           <div style={{ fontSize: '0.9rem', color: '#6B7280' }}>
             Clientes Únicos Disponíveis
@@ -287,7 +557,7 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = n
           textAlign: 'center'
         }}>
           <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#0284C7' }}>
-            {processedData.length}  {/* 🔧 NOVO - mostra clientes no ranking */}
+            {processedData.length}
           </div>
           <div style={{ fontSize: '0.9rem', color: '#0369A1' }}>
             No Ranking Atual
@@ -299,7 +569,7 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = n
             <div style={{
               padding: '16px',
               backgroundColor: '#F0FDF4',
-              border: '1px solid #BBF7D0',
+              border: '1px solid #BBF7D0',   // ✅ corrigido (sem aspas aninhadas)
               borderRadius: '12px',
               textAlign: 'center'
             }}>
@@ -319,7 +589,7 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = n
               textAlign: 'center'
             }}>
               <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#F59E0B' }}>
-                {Math.round(processedData.reduce((sum, item) => sum + item.crescimento, 0) / processedData.length)}%
+                {Math.round(processedData.reduce((sum, item) => sum + (item.crescimento || 0), 0) / processedData.length)}%
               </div>
               <div style={{ fontSize: '0.9rem', color: '#D97706' }}>
                 Crescimento Médio
@@ -349,13 +619,13 @@ const RankingTable = ({ data, title, subtitle, dataKey = "media2025", orders = n
         marginTop: '16px',
         padding: '12px',
         backgroundColor: '#F8FAFC',
-        border: '1px solid #E2E8F0',
+        border: '1px solid #E2E8F0',  // ✅ conferido
         borderRadius: '8px',
         fontSize: '0.85rem',
         color: '#6B7280',
         textAlign: 'center'
       }}>
-        📊 Dados atualizados em tempo real via Google Sheets API • 
+        📊 Dados atualizados em tempo real via Google Sheets API •
         Última sincronização: {new Date().toLocaleString('pt-BR')}
       </div>
     </div>
