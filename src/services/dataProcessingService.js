@@ -12,7 +12,7 @@ export class DataProcessingService {
     'julho','agosto','setembro','outubro','novembro','dezembro'
   ];
 
-  static GRUPO_EMPRESAS = ['Inpacto','in.Pacto','STA','Holding','Listening'];
+  static GRUPO_EMPRESAS = ['in.Pacto','STA','Holding','Listening'];
 
   // 🆕 Conta quantos meses realmente têm dados (>0) em pelo menos um cliente
   static monthsWithData(rows = []) {
@@ -1603,6 +1603,109 @@ export const calculateKPIMetrics = (filteredData) => {
       mediaMensal2024: 0,
       mediaMensal2025: 0,
       erro: error.message
+    };
+  }
+};
+
+// ==========================================
+// FUNÇÃO DINÂMICA PARA KPI CARDS
+// ==========================================
+export const extractDynamicKPIMetrics = (consolidatedData) => {
+  try {
+    console.log('📊 [KPI DINÂMICO] Extraindo dados em tempo real...');
+    console.log('📊 [KPI DINÂMICO] Dados recebidos:', {
+      tipo: typeof consolidatedData,
+      isArray: Array.isArray(consolidatedData),
+      length: Array.isArray(consolidatedData) ? consolidatedData.length : 'N/A',
+      sample: Array.isArray(consolidatedData) ? consolidatedData.slice(0, 2) : 'N/A'
+    });
+    
+    if (!consolidatedData || !Array.isArray(consolidatedData)) {
+      console.log('⚠️ [KPI] Sem dados consolidados, usando fallback');
+      return {
+        mediaMensal2024: 26.7,
+        mediaMensal2025: 95.3,
+        totalDemandas2024: 320,
+        totalDemandas2025: 953,
+        crescimento: 257,
+        mesesDecorridos2025: 10,
+        source: 'fallback'
+      };
+    }
+
+    const currentMonth = new Date().getMonth() + 1; // Outubro = 10
+    console.log('📊 [KPI DINÂMICO] Mês atual:', currentMonth);
+    
+    // Separar dados por ano dinamicamente - melhorar detecção de ano
+    const items2024 = consolidatedData.filter(item => {
+      const dataStr = item.dataEntrega || item.DataEntrega || item.data_entrega || '';
+      const has2024 = dataStr.includes('2024') || 
+                     (item.dataEntregaDate && new Date(item.dataEntregaDate).getFullYear() === 2024);
+      return has2024;
+    });
+
+    const items2025 = consolidatedData.filter(item => {
+      const dataStr = item.dataEntrega || item.DataEntrega || item.data_entrega || '';
+      const has2025 = dataStr.includes('2025') || 
+                     (item.dataEntregaDate && new Date(item.dataEntregaDate).getFullYear() === 2025);
+      return has2025;
+    });
+
+    console.log('📊 [KPI DINÂMICO] Filtros por ano:', {
+      items2024: items2024.length,
+      items2025: items2025.length,
+      sample2024: items2024.slice(0, 2).map(i => ({ 
+        dataEntrega: i.dataEntrega || i.DataEntrega || i.data_entrega,
+        cliente: i.cliente || i.Cliente || i.cliente1
+      })),
+      sample2025: items2025.slice(0, 2).map(i => ({ 
+        dataEntrega: i.dataEntrega || i.DataEntrega || i.data_entrega,
+        cliente: i.cliente || i.Cliente || i.cliente1
+      }))
+    });
+
+    // Calcular médias dinamicamente
+    const totalDemandas2024 = items2024.length;
+    const totalDemandas2025 = items2025.length;
+    
+    const mediaMensal2024 = Number((totalDemandas2024 / 12).toFixed(1));
+    const mediaMensal2025 = Number((totalDemandas2025 / currentMonth).toFixed(1));
+    
+    const crescimento = mediaMensal2024 > 0 ? 
+      Number(((mediaMensal2025 - mediaMensal2024) / mediaMensal2024 * 100).toFixed(1)) : 
+      (mediaMensal2025 > 0 ? 100 : 0);
+
+    console.log('📊 [KPI DINÂMICO] Calculado:', {
+      totalDemandas2024,
+      totalDemandas2025,
+      mediaMensal2024,
+      mediaMensal2025,
+      crescimento,
+      mesesDecorridos2025: currentMonth,
+      source: 'dynamic'
+    });
+
+    return {
+      mediaMensal2024,
+      mediaMensal2025,
+      totalDemandas2024,
+      totalDemandas2025,
+      crescimento,
+      mesesDecorridos2025: currentMonth,
+      source: 'dynamic'
+    };
+
+  } catch (error) {
+    console.error('❌ [KPI DINÂMICO] Erro:', error);
+    // Fallback para valores fixos se der erro
+    return {
+      mediaMensal2024: 26.7,
+      mediaMensal2025: 95.3,
+      totalDemandas2024: 320,
+      totalDemandas2025: 953,
+      crescimento: 257,
+      mesesDecorridos2025: 10,
+      source: 'fallback-error'
     };
   }
 };

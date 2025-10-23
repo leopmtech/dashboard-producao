@@ -62,9 +62,51 @@ const RankingTable = ({
 
   const [currentPage, setCurrentPage] = React.useState(initialPage);
   const [activeTab, setActiveTab] = React.useState('todos'); // Nova aba ativa
+  const [sortConfig, setSortConfig] = React.useState({ 
+    key: null, 
+    direction: 'asc' 
+  }); // Estado de ordenação
 
   // Empresas do grupo - exatamente essas 4 empresas únicas
-  const empresasGrupo = ['Inpacto', 'STA', 'Listening', 'Holding'];
+  const empresasGrupo = ['in.Pacto', 'STA', 'Holding', 'Listening'];
+
+  // Função para lidar com ordenação
+  const handleSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  // Função para obter ícone de ordenação
+  const getSortIcon = (key) => {
+    if (sortConfig.key !== key) return '↕️';
+    return sortConfig.direction === 'asc' ? '↑' : '↓';
+  };
+
+  // Função para obter estilo do cabeçalho baseado na ordenação
+  const getHeaderStyle = (key) => {
+    const baseStyle = {
+      padding: '16px 12px',
+      textAlign: 'center',
+      fontWeight: '600',
+      cursor: 'pointer',
+      userSelect: 'none',
+      transition: 'all 0.2s ease',
+      position: 'relative'
+    };
+
+    if (sortConfig.key === key) {
+      return {
+        ...baseStyle,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        borderBottom: '2px solid white'
+      };
+    }
+
+    return baseStyle;
+  };
   
   // Mapa Cliente -> nº de demandas a partir das ordens originais
   const demandasPorCliente = React.useMemo(() => {
@@ -88,6 +130,7 @@ const RankingTable = ({
     // Filtrar dados baseado na aba ativa
     let filteredData = data;
     if (activeTab === 'grupo') {
+      // ABA "EMPRESAS DO GRUPO": Mostrar APENAS as 4 empresas do grupo
       filteredData = data.filter(item => {
         const clienteNome = (item.cliente || '').trim();
         // Busca exata por nome da empresa (case-insensitive)
@@ -100,6 +143,22 @@ const RankingTable = ({
         totalOriginal: data.length,
         filtradas: filteredData.length,
         empresasEncontradas: filteredData.map(item => item.cliente)
+      });
+    } else {
+      // ABA "TODOS OS CLIENTES": Mostrar TODOS EXCETO as empresas do grupo
+      filteredData = data.filter(item => {
+        const clienteNome = (item.cliente || '').trim();
+        // Excluir as empresas do grupo
+        return !empresasGrupo.some(empresa => 
+          clienteNome.toLowerCase() === empresa.toLowerCase()
+        );
+      });
+      
+      console.log('📊 [TODOS OS CLIENTES] Filtrados:', {
+        totalOriginal: data.length,
+        filtradas: filteredData.length,
+        empresasExcluidas: empresasGrupo,
+        clientesEncontrados: filteredData.slice(0, 5).map(item => item.cliente)
       });
     }
 
@@ -152,15 +211,59 @@ const RankingTable = ({
       }
     });
 
-    // Ordenar por média 2025 ou total conforme o caso (sem limite de 10!)
-    const sorted = processed
-      .filter(item => (dataKey === "media2025" ? item.media2025 > 0 : item.total > 0))
-      .sort((a, b) => (dataKey === "media2025" ? b.media2025 - a.media2025 : b.total - a.total))
-      .map((item, idx) => ({ ...item, ranking: idx + 1 }));
+    // Ordenar baseado na configuração de ordenação ou padrão
+    let sorted = processed.filter(item => (dataKey === "media2025" ? item.media2025 > 0 : item.total > 0));
+    
+    if (sortConfig.key) {
+      sorted = sorted.sort((a, b) => {
+        let aValue, bValue;
+        
+        switch (sortConfig.key) {
+          case 'media2024':
+            aValue = a.media2024 || 0;
+            bValue = b.media2024 || 0;
+            break;
+          case 'media2025':
+            aValue = a.media2025 || 0;
+            bValue = b.media2025 || 0;
+            break;
+          case 'crescimento':
+            aValue = a.crescimento || 0;
+            bValue = b.crescimento || 0;
+            break;
+          case 'demandas':
+            aValue = a.demandas || 0;
+            bValue = b.demandas || 0;
+            break;
+          case 'cliente':
+            aValue = (a.cliente || '').toLowerCase();
+            bValue = (b.cliente || '').toLowerCase();
+            break;
+          default:
+            aValue = a.media2025 || 0;
+            bValue = b.media2025 || 0;
+        }
+        
+        if (sortConfig.key === 'cliente') {
+          return sortConfig.direction === 'asc' 
+            ? aValue.localeCompare(bValue)
+            : bValue.localeCompare(aValue);
+        } else {
+          return sortConfig.direction === 'asc' 
+            ? aValue - bValue 
+            : bValue - aValue;
+        }
+      });
+    } else {
+      // Ordenação padrão por média 2025 ou total
+      sorted = sorted.sort((a, b) => (dataKey === "media2025" ? b.media2025 - a.media2025 : b.total - a.total));
+    }
+    
+    sorted = sorted.map((item, idx) => ({ ...item, ranking: idx + 1 }));
 
     console.log('📋 Dados processados para tabela:', sorted.length);
     return sorted;
-  }, [data, dataKey, demandasPorCliente, activeTab]);
+  }, [data, dataKey, demandasPorCliente, activeTab, sortConfig]);
 
   // Paginação
   const totalPages = Math.max(1, Math.ceil((processedData.length || 0) / pageSize));
@@ -289,24 +392,57 @@ const RankingTable = ({
           <thead style={{ backgroundColor: '#FF6B47', color: 'white' }}>
             <tr>
               <th style={{ padding: '16px 12px', textAlign: 'left', fontWeight: '600' }}>🏆 Ranking</th>
-              <th style={{ padding: '16px 12px', textAlign: 'left', fontWeight: '600' }}>🏢 Cliente</th>
+              <th 
+                style={{ 
+                  padding: '16px 12px', 
+                  textAlign: 'left', 
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  transition: 'background-color 0.2s ease'
+                }}
+                onClick={() => handleSort('cliente')}
+                onMouseEnter={(e) => e.target.style.backgroundColor = 'rgba(255,255,255,0.1)'}
+                onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+              >
+                🏢 Cliente {getSortIcon('cliente')}
+              </th>
 
               {dataKey === "media2025" ? (
                 <>
-                  <th style={{ padding: '16px 12px', textAlign: 'center', fontWeight: '600' }}>
-                    📊 Média 2024<br />
+                  <th 
+                    style={getHeaderStyle('media2024')}
+                    onClick={() => handleSort('media2024')}
+                    onMouseEnter={(e) => e.target.style.backgroundColor = 'rgba(255,255,255,0.1)'}
+                    onMouseLeave={(e) => e.target.style.backgroundColor = sortConfig.key === 'media2024' ? 'rgba(255,255,255,0.2)' : 'transparent'}
+                  >
+                    📊 Média 2024 {getSortIcon('media2024')}<br />
                     <span style={{ fontSize: '0.75rem', opacity: '0.9' }}>(rel/mês)</span>
                   </th>
-                  <th style={{ padding: '16px 12px', textAlign: 'center', fontWeight: '600' }}>
-                    📊 Média 2025<br />
+                  <th 
+                    style={getHeaderStyle('media2025')}
+                    onClick={() => handleSort('media2025')}
+                    onMouseEnter={(e) => e.target.style.backgroundColor = 'rgba(255,255,255,0.1)'}
+                    onMouseLeave={(e) => e.target.style.backgroundColor = sortConfig.key === 'media2025' ? 'rgba(255,255,255,0.2)' : 'transparent'}
+                  >
+                    📊 Média 2025 {getSortIcon('media2025')}<br />
                     <span style={{ fontSize: '0.75rem', opacity: '0.9' }}>(rel/mês)</span>
                   </th>
-                  <th style={{ padding: '16px 12px', textAlign: 'center', fontWeight: '600' }}>
-                    📈 Crescimento
+                  <th 
+                    style={getHeaderStyle('crescimento')}
+                    onClick={() => handleSort('crescimento')}
+                    onMouseEnter={(e) => e.target.style.backgroundColor = 'rgba(255,255,255,0.1)'}
+                    onMouseLeave={(e) => e.target.style.backgroundColor = sortConfig.key === 'crescimento' ? 'rgba(255,255,255,0.2)' : 'transparent'}
+                  >
+                    📈 Crescimento {getSortIcon('crescimento')}
                   </th>
-                  {/* NOVA COLUNA */}
-                  <th style={{ padding: '16px 12px', textAlign: 'center', fontWeight: '600' }}>
-                    🧾 Demandas
+                  <th 
+                    style={getHeaderStyle('demandas')}
+                    onClick={() => handleSort('demandas')}
+                    onMouseEnter={(e) => e.target.style.backgroundColor = 'rgba(255,255,255,0.1)'}
+                    onMouseLeave={(e) => e.target.style.backgroundColor = sortConfig.key === 'demandas' ? 'rgba(255,255,255,0.2)' : 'transparent'}
+                  >
+                    🧾 Demandas {getSortIcon('demandas')}
                   </th>
                 </>
               ) : (

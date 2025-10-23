@@ -28,7 +28,7 @@ import AnalystsCalendar from './components/AnalystsCalendar';
 
 // Hooks e serviços - 🔧 IMPORT CORRIGIDO
 import { default as useDashboardData } from './hooks/useDashboardData';
-import { DataProcessingService } from './services/dataProcessingService'; // 👈 CORRIGIDO: named import
+import { DataProcessingService, extractDynamicKPIMetrics } from './services/dataProcessingService'; // 👈 CORRIGIDO: named import
 
 function App() {
   const [filters, setFilters] = useState({
@@ -115,6 +115,21 @@ function App() {
       };
     return DataProcessingService.calculateAdvancedMetrics(filteredData, filters);
   }, [filteredData, filters]);
+
+  // 🆕 KPI Dinâmico - Atualiza em tempo real baseado nos dados consolidados
+  const dynamicKpiMetrics = React.useMemo(() => {
+    console.log('🔄 [KPI] Atualizando métricas dinamicamente...');
+    return extractDynamicKPIMetrics(data || []);
+  }, [data]); // ✅ Atualiza quando dados mudam
+
+  // Debug para verificar se está atualizando
+  React.useEffect(() => {
+    console.log('📊 [KPI STATUS]', {
+      fonte: dynamicKpiMetrics.source,
+      ultimaAtualizacao: new Date().toLocaleTimeString(),
+      valores: dynamicKpiMetrics
+    });
+  }, [dynamicKpiMetrics]);
 
   const chartData = React.useMemo(() => {
     if (!filteredData)
@@ -317,7 +332,7 @@ function App() {
             
             <KPICard
               title="Meses Analisados"
-              value={metrics.mesesAnalisados || 0}
+              value={dynamicKpiMetrics.mesesDecorridos2025 || 10}
               subtitle="Até o mês atual de 2025"
               gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
               delay="200ms"
@@ -325,33 +340,33 @@ function App() {
             
             <KPICard
               title="Crescimento Médio"
-              value={`${metrics.crescimento > 0 ? '+' : ''}${metrics.crescimento || 0}%`}
+              value={`${dynamicKpiMetrics.crescimento > 0 ? '+' : ''}${dynamicKpiMetrics.crescimento || 0}%`}
               subtitle="Comparando médias mensais"
               gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
               delay="300ms"
             />
             
-            {/* KPI Cards com valores corretos */}
+            {/* KPI Cards dinâmicos */}
             <KPICard
               title="Média mensal 2024"
-              value={26.7}
-              subtitle="320 demandas em 12 meses"
+              value={dynamicKpiMetrics.mediaMensal2024}
+              subtitle={`${dynamicKpiMetrics.totalDemandas2024} demandas em 12 meses`}
               gradient="linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)"
               delay="300ms"
             />
             
             <KPICard
               title="Média mensal 2025"
-              value={95.3}
-              subtitle="953 demandas em 10 meses"
+              value={dynamicKpiMetrics.mediaMensal2025}
+              subtitle={`${dynamicKpiMetrics.totalDemandas2025} demandas em ${dynamicKpiMetrics.mesesDecorridos2025 || 10} meses`}
               gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
               delay="500ms"
             />
             
             <KPICard
               title="Crescimento 2025"
-              value="+257%"
-              subtitle="+68.6 demandas/mês"
+              value={`+${dynamicKpiMetrics.crescimento || 0}%`}
+              subtitle={`+${((dynamicKpiMetrics.mediaMensal2025 || 0) - (dynamicKpiMetrics.mediaMensal2024 || 0)).toFixed(1)} demandas/mês`}
               gradient="linear-gradient(135deg, #10B981 0%, #34D399 100%)"
               delay="700ms"
             />
