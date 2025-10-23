@@ -217,7 +217,7 @@ export class DataProcessingService {
     const currentMonth = currentDate.getMonth() + 1; // Janeiro = 1, Outubro = 10
 
     // ✅ FILTRAR DADOS DE 2024
-    const data2024 = filteredData.filter(item => {
+    const dados2024Filtrados = filteredData.filter(item => {
       if (!item.dataEntrega) return false;
       
       try {
@@ -265,7 +265,7 @@ export class DataProcessingService {
     });
 
     // ✅ CÁLCULO CORRETO PARA 2024
-    const totalDemandas2024 = data2024.length;
+      const totalDemandas2024 = dados2024Filtrados.length;
     const mesesTotais2024 = 12; // 2024 completo = 12 meses
     
     const mediaMensal2024 = mesesTotais2024 > 0 ? 
@@ -313,7 +313,7 @@ export class DataProcessingService {
       crescimento,
       
       // ✅ CLIENTES ÚNICOS
-      totalClientes2024: new Set(data2024.map(item => item.cliente).filter(Boolean)).size,
+      totalClientes2024: new Set(dados2024Filtrados.map(item => item.cliente).filter(Boolean)).size,
       totalClientes2025: new Set(data2025.map(item => item.cliente).filter(Boolean)).size,
       
       // ✅ OUTRAS MÉTRICAS
@@ -331,7 +331,7 @@ export class DataProcessingService {
       const actualCurrentMonthIndex = new Date().getMonth();
 
       const currentData = data.visaoGeral || [];
-      const data2024 = data.visaoGeral2024 || [];
+      const dados2024Visao = data.visaoGeral2024 || [];
 
       // Calcular médias baseadas nos dados reais de demandas
       let sumAvg2024 = 0;
@@ -596,7 +596,7 @@ export class DataProcessingService {
 
       return {
         totalClientes: uniqueClients.size,
-        totalClientes2024: data2024.length,
+        totalClientes2024: dados2024Ranking.length,
         totalRelatorios,
         totalDemandas: totalRelatorios,
         crescimento: this.roundToDecimal(crescimento, 0),
@@ -635,7 +635,7 @@ export class DataProcessingService {
     const actualCurrentMonthIndex = new Date().getMonth();
 
     const currentData = data.visaoGeral || [];
-    const data2024 = data.visaoGeral2024 || [];
+    const dados2024Ranking = data.visaoGeral2024 || [];
 
     const monthly = {};
     monthNames.forEach((name, idx) => {
@@ -649,7 +649,7 @@ export class DataProcessingService {
       };
     });
 
-    data2024.forEach(c => {
+    dados2024Ranking.forEach(c => {
       monthKeys.forEach((mk, i) => {
         const v = c[mk] || 0;
         if (v > 0) {
@@ -1125,7 +1125,7 @@ export class DataProcessingService {
   // - filters.excludeGroup === true -> exclui Inpacto/STA/Holding/Listening
   static processRankingData(data, filters = {}) {
     const currentData = data.visaoGeral || [];
-    const data2024 = data.visaoGeral2024 || [];
+    const dados2024Ranking = data.visaoGeral2024 || [];
     const originalOrders = data.originalOrders || [];
     const periodo = filters.periodo || 'ambos';
     const onlyGroup = !!filters.onlyGroup;
@@ -1140,7 +1140,7 @@ export class DataProcessingService {
     console.log('🏆 [RANKING] Entrada:', {
       periodo,
       currentData: currentData.length,
-      data2024: data2024.length,
+      data2024: dados2024Ranking.length,
       originalOrders: originalOrders.length,
       onlyGroup,
       excludeGroup
@@ -1313,10 +1313,10 @@ export class DataProcessingService {
   // 🆕 CORRIGIDO: usa divisores dinâmicos (12 para 2024; meses com dados para 2025)
   static processComparisonData(data, filters) {
     const currentData = data.visaoGeral || [];
-    const data2024 = data.visaoGeral2024 || [];
+    const dados2024Ranking = data.visaoGeral2024 || [];
 
     const total2025 = currentData.reduce((s, c) => s + (c.total || 0), 0);
-    const total2024 = data2024.reduce((s, c) => s + (c.total || 0), 0);
+    const total2024 = dados2024Ranking.reduce((s, c) => s + (c.total || 0), 0);
 
     const divisor2024 = 12;
     const divisor2025 = this.monthsWithData(currentData);
@@ -1325,12 +1325,12 @@ export class DataProcessingService {
       ? Math.round((total2025 / Math.max(divisor2025,1)) * 10) / 10
       : 0;
 
-    const media2024 = data2024.length > 0
+    const media2024 = dados2024Ranking.length > 0
       ? Math.round((total2024 / divisor2024) * 10) / 10
       : 0;
 
     return [
-      { periodo: '2024', total: total2024, media: media2024, clientes: data2024.length },
+      { periodo: '2024', total: total2024, media: media2024, clientes: dados2024Ranking.length },
       { periodo: '2025', total: total2025, media: media2025, clientes: currentData.length }
     ];
   }
@@ -1426,7 +1426,7 @@ export const calculateAdvancedMetrics = (filteredData, filters) => {
   const currentMonth = currentDate.getMonth() + 1; // Janeiro = 1, Outubro = 10
 
   // ✅ FILTRAR DADOS DE 2024
-  const data2024 = filteredData.filter(item => {
+  const dados2024Export = filteredData.filter(item => {
     if (!item.dataEntrega) return false;
     
     try {
@@ -1474,7 +1474,7 @@ export const calculateAdvancedMetrics = (filteredData, filters) => {
   });
 
   // ✅ CÁLCULO CORRETO PARA 2024
-  const totalDemandas2024 = data2024.length;
+      const totalDemandas2024 = dados2024Filtrados.length;
   const mesesTotais2024 = 12; // 2024 completo = 12 meses
   
   const mediaMensal2024 = mesesTotais2024 > 0 ? 
@@ -1522,7 +1522,7 @@ export const calculateAdvancedMetrics = (filteredData, filters) => {
     crescimento,
     
     // ✅ CLIENTES ÚNICOS
-    totalClientes2024: new Set(data2024.map(item => item.cliente).filter(Boolean)).size,
+    totalClientes2024: new Set(dados2024Export.map(item => item.cliente).filter(Boolean)).size,
     totalClientes2025: new Set(data2025.map(item => item.cliente).filter(Boolean)).size,
     
     // ✅ OUTRAS MÉTRICAS
