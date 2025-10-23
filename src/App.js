@@ -236,7 +236,7 @@ function App() {
       ],
       analysts: [
         { label: 'Dashboard', onClick: () => handleViewChange('dashboard') },
-        { label: 'Calendário dos Analistas' },
+        // { label: 'Calendário dos Analistas' },
       ],
       analytics: [
         { label: 'Dashboard', onClick: () => handleViewChange('dashboard') },
@@ -325,7 +325,7 @@ function App() {
         ],
         analysts: [
           { label: 'Dashboard', onClick: () => handleViewChange('dashboard') },
-          { label: 'Calendário dos Analistas' },
+          // { label: 'Calendário dos Analistas' },
         ],
         analytics: [
           { label: 'Dashboard', onClick: () => handleViewChange('dashboard') },
@@ -435,39 +435,6 @@ function App() {
         )}
       </div>
 
-      {/* 🆕 Indicador de Fontes de Dados - NOVO */}
-      <div className="data-sources-indicator" style={{
-        padding: '12px 20px',
-        background: 'rgba(16, 185, 129, 0.1)',
-        border: '1px solid rgba(16, 185, 129, 0.3)',
-        borderRadius: '8px',
-        margin: '16px 0',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '16px',
-        fontSize: '0.9rem'
-      }}>
-        <span style={{ fontSize: '1.2rem' }}>📊</span>
-        <div>
-          <strong>Fontes de Dados Ativas:</strong>
-          <div style={{ marginTop: '4px', display: 'flex', gap: '16px' }}>
-            <span style={{ color: '#065F46' }}>
-              📊 Google Sheets: {dataSourcesCount.sheets} registros
-            </span>
-            <span style={{ color: '#065F46' }}>
-              📝 Notion: {dataSourcesCount.notion} registros
-            </span>
-            <span style={{ color: '#065F46' }}>
-              🔗 Total Consolidado: {dataSourcesCount.total} registros
-            </span>
-          </div>
-          {dataSourcesCount.total === 0 && (
-            <div style={{ marginTop: '4px', color: '#DC2626', fontSize: '0.8rem' }}>
-              ⚠️ Nenhum dado com marcação de fonte encontrado. Verifique a consolidação.
-            </div>
-          )}
-        </div>
-      </div>
 
       {/* Gráfico Comparativo In.pacto vs STA - TEMPORARIAMENTE DESABILITADO */}
       <div className="charts-row modern">
@@ -860,13 +827,13 @@ function App() {
       case 'analysts':
         return (
           <div style={{ padding: '20px' }}>
-            <AnalystsCalendar
+            {/* <AnalystsCalendar
               data={data}
               title="📅 Calendário dos Analistas"
               onEventClick={(task) => {
                 console.log('Tarefa clicada:', task);
               }}
-            />
+            /> */}
           </div>
         );
 
@@ -1018,51 +985,11 @@ function App() {
                 {/* Debug info */}
                 {uniqueDemandTypes && (
                   <div style={{ fontSize: '11px', color: '#666', marginTop: '4px' }}>
-                    ✅ {uniqueDemandTypes.length} tipos consolidados (Notion + Sheets)
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Indicador de Status dos Filtros */}
-
-            <div
-              style={{
-                marginTop: '16px',
-                padding: '12px 16px',
-                background:
-                  filters.cliente !== 'todos' || filters.tipo !== 'geral' || filters.periodo !== 'ambos'
-                    ? 'rgba(245, 158, 11, 0.1)'
-                    : 'rgba(16, 185, 129, 0.1)',
-                border: `1px solid ${
-                  filters.cliente !== 'todos' || filters.tipo !== 'geral' || filters.periodo !== 'ambos'
-                    ? 'rgba(245, 158, 11, 0.3)'
-                    : 'rgba(16, 185, 129, 0.3)'
-                }`,
-                borderRadius: '8px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                fontSize: '0.9rem',
-              }}
-            >
-              <span style={{ fontSize: '1.2rem' }}>
-                {filters.cliente !== 'todos' || filters.tipo !== 'geral' || filters.periodo !== 'ambos' ? '🔍' : '✅'}
-              </span>
-              <span
-                style={{
-                  color:
-                    filters.cliente !== 'todos' || filters.tipo !== 'geral' || filters.periodo !== 'ambos' ? '#92400E' : '#065F46',
-                  fontWeight: '600',
-                }}
-              >
-                {filters.cliente !== 'todos' || filters.tipo !== 'geral' || filters.periodo !== 'ambos'
-                  ? `Filtros ativos: ${filteredData?.visaoGeral?.length || 0} clientes, ${
-                      filteredData?.visaoGeral?.reduce((sum, c) => sum + (c.total || 0), 0) || 0
-                    } relatórios`
-                  : `Visualizando todos os dados • ${uniqueDemandTypes?.length || 0} tipos consolidados disponíveis`}
-              </span>
-            </div>
           </div>
         </div>
       )}
@@ -1091,8 +1018,8 @@ function App() {
           zIndex: 999999,
         }}
       >
-        {/* Calendário dos Analistas */}
-        <button
+        {/* Calendário dos Analistas - COMENTADO */}
+        {/* <button
           onClick={() => handleViewChange('analysts')}
           style={{
             width: '56px',
@@ -1120,7 +1047,7 @@ function App() {
           title="Calendário dos Analistas"
         >
           <span role="img" aria-label="team">👥</span>
-        </button>
+        </button> */}
 
         {/* Heatmap */}
         <button

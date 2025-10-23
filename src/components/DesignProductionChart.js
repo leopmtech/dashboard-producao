@@ -288,7 +288,7 @@ const DesignProductionChart = ({ data, title, subtitle, filters = { periodo: '20
           fontSize={12}
           tick={{ fill: colors.textSecondary }}
           label={{ 
-            value: 'Projetos de Design - Gustavo Oliveira', 
+            value: 'Projetos de Design', 
             angle: -90, 
             position: 'insideLeft',
             style: { textAnchor: 'middle', fill: colors.primary }
@@ -476,7 +476,6 @@ const DesignProductionChart = ({ data, title, subtitle, filters = { periodo: '20
           fontWeight: '600',
           color: colors.creative
         }}>
-          🎯 Filtrado para mostrar apenas trabalhos do designer Gustavo Oliveira
         </div>
       </div>
 
@@ -502,7 +501,7 @@ const DesignProductionChart = ({ data, title, subtitle, filters = { periodo: '20
               alignItems: 'center',
               gap: '8px'
             }}>
-              🏆 Top 3 Clientes - Portfólio Gustavo Oliveira (2024 vs 2025)
+              🏆 Top 3 Clientes - Portfólio Design
             </h4>
             
             <div style={{
@@ -651,7 +650,7 @@ const DesignProductionChart = ({ data, title, subtitle, filters = { periodo: '20
                 margin: '0 0 16px 0',
                 textAlign: 'center'
               }}>
-                📊 Portfólio Completo - Gustavo Oliveira (Design)
+                📊 Portfólio Completo
               </h5>
               
               <div style={{
