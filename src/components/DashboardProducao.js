@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { TrendingUp, Users, FileText, Clock, Target, Calendar, Filter, Download, RefreshCw, Wifi, WifiOff, BarChart3 } from 'lucide-react';
+import { dataStandardizer } from '../utils/dataStandardization.js';
+import SourceAwareKPI from './SourceAwareKPI.js';
 
 // ==========================================
 // CONFIGURAÇÕES DE DESIGN E CORES
@@ -86,6 +88,95 @@ class DataProcessor {
       crescimento: Math.round(Math.max(0, crescimento)),
       produtividadeMensal: Math.round(totalRelatorios / 5)
     };
+  }
+
+  // 🆕 Método com awareness de fontes
+  static processMetricsWithSourceAwareness(data, filters = {}) {
+    console.log('📊 [DATA PROCESSOR] Processando métricas com awareness de fonte...');
+    
+    // Converter dados para formato compatível com dataStandardizer
+    const compatibleData = this.convertToCompatibleFormat(data);
+    
+    // Usar dataStandardizer para contagem com awareness de fonte
+    const sourceAwareCount = dataStandardizer.getStandardizedCount(compatibleData, {
+      year: filters.year || 'all',
+      type: filters.type || 'all',
+      cliente: filters.cliente || 'all',
+      showBreakdown: true
+    });
+
+    // Calcular métricas tradicionais
+    const traditionalMetrics = this.processMetrics(data);
+    
+    // Adicionar breakdown por fonte
+    const enhancedMetrics = {
+      ...traditionalMetrics,
+      sourceBreakdown: sourceAwareCount.breakdown,
+      totalBySource: {
+        sheets: sourceAwareCount.breakdown.sheets,
+        notion: sourceAwareCount.breakdown.notion,
+        unknown: sourceAwareCount.breakdown.unknown
+      },
+      sourceDefinitions: sourceAwareCount.sourceDefinitions,
+      integrityCheck: dataStandardizer.validateDataIntegrity(compatibleData)
+    };
+
+    console.log('📊 [DATA PROCESSOR] Métricas com awareness:', enhancedMetrics);
+    return enhancedMetrics;
+  }
+
+  // Converter dados do formato atual para formato compatível com dataStandardizer
+  static convertToCompatibleFormat(data) {
+    const compatibleData = [];
+    
+    // Processar dados de visão geral
+    if (data.visaoGeral) {
+      data.visaoGeral.forEach(cliente => {
+        // Adicionar registros para cada mês com dados
+        const meses = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio'];
+        meses.forEach(mes => {
+          if (cliente[mes] > 0) {
+            compatibleData.push({
+              id: `ORD-${cliente.cliente}-${mes}`,
+              cliente: cliente.cliente,
+              dataEntrega: `2024-${this.getMonthNumber(mes)}-01`,
+              isRelatorio: true,
+              _source: 'sheets', // Dados históricos do Sheets
+              valor: cliente[mes] * 1000 // Estimativa de valor
+            });
+          }
+        });
+      });
+    }
+
+    // Processar dados de 2025 se existirem
+    if (data.visaoGeral2025) {
+      data.visaoGeral2025.forEach(cliente => {
+        if (cliente['2025'] > 0) {
+          compatibleData.push({
+            id: `ORD-${cliente.cliente}-2025`,
+            cliente: cliente.cliente,
+            dataEntrega: '2025-01-01',
+            isRelatorio: true,
+            _source: 'notion', // Dados atuais do Notion
+            valor: cliente['2025'] * 1000
+          });
+        }
+      });
+    }
+
+    console.log('📊 [DATA PROCESSOR] Dados convertidos:', compatibleData.length, 'registros');
+    return compatibleData;
+  }
+
+  static getMonthNumber(mes) {
+    const meses = {
+      'janeiro': '01', 'fevereiro': '02', 'marco': '03',
+      'abril': '04', 'maio': '05', 'junho': '06',
+      'julho': '07', 'agosto': '08', 'setembro': '09',
+      'outubro': '10', 'novembro': '11', 'dezembro': '12'
+    };
+    return meses[mes] || '01';
   }
 
   static processMonthlyTrend(data) {
@@ -393,8 +484,8 @@ const DashboardProducao = () => {
     tipo: 'todos'
   });
 
-  // Dados processados
-  const metrics = DataProcessor.processMetrics(data);
+  // Dados processados com awareness de fonte
+  const metrics = DataProcessor.processMetricsWithSourceAwareness(data, filters);
   const trendData = DataProcessor.processMonthlyTrend(data);
   const clientesTop = DataProcessor.processClientesTop(data);
   const tiposData = DataProcessor.processTiposRelatorio(data);
@@ -459,43 +550,53 @@ const DashboardProducao = () => {
         onFilterChange={handleFilterChange}
       />
 
-      {/* KPIs principais */}
+      {/* KPIs principais com awareness de fonte */}
       <div className="kpis-grid">
-        <KPICard
+        <SourceAwareKPI
           title="Total de Clientes"
           value={metrics.totalClientes}
           icon={Users}
           gradient={DESIGN_CONFIG.colors.gradient.primary}
           subtitle="Clientes ativos"
+          sourceBreakdown={metrics.sourceBreakdown}
+          sourceDefinitions={metrics.sourceDefinitions}
         />
-        <KPICard
+        <SourceAwareKPI
           title="Total de Relatórios"
           value={metrics.totalRelatorios}
           icon={FileText}
           gradient={DESIGN_CONFIG.colors.gradient.success}
           subtitle="Em 2025"
           trend={metrics.crescimento}
+          sourceBreakdown={metrics.sourceBreakdown}
+          sourceDefinitions={metrics.sourceDefinitions}
         />
-        <KPICard
+        <SourceAwareKPI
           title="Média por Cliente/Mês"
           value={metrics.mediaClienteMes}
           icon={Target}
           gradient={DESIGN_CONFIG.colors.gradient.warning}
           subtitle="Relatórios/mês"
+          sourceBreakdown={metrics.sourceBreakdown}
+          sourceDefinitions={metrics.sourceDefinitions}
         />
-        <KPICard
+        <SourceAwareKPI
           title="Produtividade Mensal"
           value={metrics.produtividadeMensal}
           icon={BarChart3}
           gradient={DESIGN_CONFIG.colors.gradient.primary}
           subtitle="Relatórios/mês"
+          sourceBreakdown={metrics.sourceBreakdown}
+          sourceDefinitions={metrics.sourceDefinitions}
         />
-        <KPICard
+        <SourceAwareKPI
           title="Crescimento"
           value={`+${metrics.crescimento}%`}
           icon={TrendingUp}
           gradient={DESIGN_CONFIG.colors.gradient.success}
           subtitle="Desde nova diretoria"
+          sourceBreakdown={metrics.sourceBreakdown}
+          sourceDefinitions={metrics.sourceDefinitions}
         />
       </div>
 

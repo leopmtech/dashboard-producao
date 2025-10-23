@@ -332,6 +332,7 @@ export class DataProcessingService {
 
       const currentData = data.visaoGeral || [];
       const dados2024Visao = data.visaoGeral2024 || [];
+      const dados2024Ranking = data.visaoGeral2024 || [];
 
       // Calcular médias baseadas nos dados reais de demandas
       let sumAvg2024 = 0;

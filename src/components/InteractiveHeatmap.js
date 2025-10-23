@@ -26,7 +26,14 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
 
   // Processar dados para heatmap com base nos anos selecionados
   const heatmapData = useMemo(() => {
-    if (!data) return { clients: [], months: [], matrix: [], maxValue: 0, totalSum: 0 };
+    console.log('🗺️ [HEATMAP DEBUG] Dados recebidos:', {
+      dataType: typeof data,
+      isArray: Array.isArray(data),
+      length: Array.isArray(data) ? data.length : 'N/A',
+      sampleItem: Array.isArray(data) && data.length > 0 ? data[0] : null
+    });
+    
+    if (!data || !Array.isArray(data)) return { clients: [], months: [], matrix: [], maxValue: 0, totalSum: 0 };
 
     const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
     const monthKeys = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
@@ -40,15 +47,42 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
     const filteredMonths = months;
     const filteredMonthKeys = monthKeys;
     
-    // Usar dados processados (visaoGeral) que já estão funcionando
+    // CORREÇÃO: Usar dados filtrados diretamente (data é um array)
     const allClients = new Set();
     
-    if (selectedYears.includes('2025') && data.visaoGeral) {
-      data.visaoGeral.forEach(client => client?.cliente && allClients.add(client.cliente));
+    // Processar dados 2025 dos dados filtrados
+    if (selectedYears.includes('2025')) {
+      const items2025 = data.filter(item => {
+        const dataStr = item.dataEntrega || '';
+        return dataStr.includes('2025');
+      });
+      
+      console.log('🗺️ [HEATMAP DEBUG] Dados 2025:', {
+        totalItems: items2025.length,
+        sampleItems: items2025.slice(0, 3)
+      });
+      
+      items2025.forEach(item => {
+        const cliente = item.cliente || item.cliente1 || item.cliente2 || 'Cliente Desconhecido';
+        if (cliente && cliente.trim()) {
+          allClients.add(cliente.trim());
+        }
+      });
     }
     
-    if (selectedYears.includes('2024') && data.visaoGeral2024) {
-      data.visaoGeral2024.forEach(client => client?.cliente && allClients.add(client.cliente));
+    // Processar dados 2024 dos dados filtrados
+    if (selectedYears.includes('2024')) {
+      const items2024 = data.filter(item => {
+        const dataStr = item.dataEntrega || '';
+        return dataStr.includes('2024');
+      });
+      
+      items2024.forEach(item => {
+        const cliente = item.cliente || item.cliente1 || item.cliente2 || 'Cliente Desconhecido';
+        if (cliente && cliente.trim()) {
+          allClients.add(cliente.trim());
+        }
+      });
     }
 
     const clients = Array.from(allClients).sort();
@@ -57,15 +91,35 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
     let maxValue = 0;
     let totalSum = 0;
     
-    // Função para obter dados do cliente por ano (usando dados processados)
+    // Função para obter dados do cliente por ano (usando dados filtrados)
     const getClientData = (clientName, year) => {
-      if (year === '2025' && data.visaoGeral) {
-        return data.visaoGeral.find(c => c.cliente === clientName) || {};
-      }
-      if (year === '2024' && data.visaoGeral2024) {
-        return data.visaoGeral2024.find(c => c.cliente === clientName) || {};
-      }
-      return {};
+      if (!data || !Array.isArray(data)) return {};
+      
+      const items = data.filter(item => {
+        const dataStr = item.dataEntrega || '';
+        const cliente = item.cliente || item.cliente1 || item.cliente2 || '';
+        return dataStr.includes(year) && cliente.trim() === clientName;
+      });
+      
+      // Calcular dados mensais para o cliente
+      const monthData = {};
+      let total = 0;
+      
+      items.forEach(item => {
+        const dataEntrega = new Date(item.dataEntrega);
+        const monthIndex = dataEntrega.getMonth();
+        const monthKey = monthKeys[monthIndex];
+        
+        if (monthKey) {
+          monthData[monthKey] = (monthData[monthKey] || 0) + 1;
+          total += 1;
+        }
+      });
+      
+      return {
+        ...monthData,
+        total: total
+      };
     };
 
     // Calcular max value considerando todos os anos selecionados
@@ -152,7 +206,17 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
       totalSum,
       matrixCells: matrix.length * (matrix[0]?.length || 0),
       sampleClient: clients[0] || 'N/A',
-      sampleData: matrix[0]?.[0] || null
+      sampleData: matrix[0]?.[0] || null,
+      selectedYears,
+      dataSource: 'originalOrders',
+      totalClients: clients.length,
+      totalReports: totalSum,
+      debug: {
+        dataLength: data?.length || 0,
+        dataType: typeof data,
+        isArray: Array.isArray(data),
+        sampleItem: data?.[0] || null
+      }
     });
 
     return { clients, months: filteredMonths, matrix, maxValue, totalSum };
@@ -189,7 +253,7 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
 
   // Obter estatísticas do cliente
   const getClientStats = (clientName) => {
-    if (!data) return null;
+    if (!data || !Array.isArray(data)) return null;
 
     const stats = {
       total2024: 0,
@@ -203,36 +267,54 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
     };
 
     // Dados 2024
-    if (data.visaoGeral2024) {
-      const client2024 = data.visaoGeral2024.find(c => c.cliente === clientName);
-      if (client2024) {
-        stats.total2024 = client2024.total || 0;
-        const monthKeys = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
-        const values2024 = monthKeys.map(key => client2024[key] || 0);
-        const nonZero2024 = values2024.filter(v => v > 0);
-        stats.average2024 = nonZero2024.length > 0 ? Math.round((nonZero2024.reduce((sum, v) => sum + v, 0) / nonZero2024.length) * 10) / 10 : 0;
-        stats.peak = Math.max(stats.peak, ...values2024);
-        stats.activeMonths += nonZero2024.length;
-      }
+    const items2024 = data.filter(item => {
+      const dataStr = item.dataEntrega || '';
+      const cliente = item.cliente || item.cliente1 || item.cliente2 || '';
+      return dataStr.includes('2024') && cliente.trim() === clientName;
+    });
+    
+    if (items2024.length > 0) {
+      stats.total2024 = items2024.length;
+      const monthKeys = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+      const values2024 = monthKeys.map(key => {
+        return items2024.filter(item => {
+          const dataEntrega = new Date(item.dataEntrega);
+          const monthIndex = dataEntrega.getMonth();
+          return monthKeys[monthIndex] === key;
+        }).length;
+      });
+      const nonZero2024 = values2024.filter(v => v > 0);
+      stats.average2024 = nonZero2024.length > 0 ? Math.round((nonZero2024.reduce((sum, v) => sum + v, 0) / nonZero2024.length) * 10) / 10 : 0;
+      stats.peak = Math.max(stats.peak, ...values2024);
+      stats.activeMonths += nonZero2024.length;
     }
 
     // Dados 2025
-    if (data.visaoGeral) {
-      const client2025 = data.visaoGeral.find(c => c.cliente === clientName);
-      if (client2025) {
-        stats.total2025 = client2025.total || 0;
-        const monthKeys = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
-        const values2025 = monthKeys.map(key => client2025[key] || 0);
-        const nonZero2025 = values2025.filter(v => v > 0);
-        stats.average2025 = nonZero2025.length > 0 ? Math.round((nonZero2025.reduce((sum, v) => sum + v, 0) / nonZero2025.length) * 10) / 10 : 0;
-        stats.peak = Math.max(stats.peak, ...values2025);
-        stats.activeMonths += nonZero2025.length;
-      }
+    const items2025 = data.filter(item => {
+      const dataStr = item.dataEntrega || '';
+      const cliente = item.cliente || item.cliente1 || item.cliente2 || '';
+      return dataStr.includes('2025') && cliente.trim() === clientName;
+    });
+    
+    if (items2025.length > 0) {
+      stats.total2025 = items2025.length;
+      const monthKeys = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+      const values2025 = monthKeys.map(key => {
+        return items2025.filter(item => {
+          const dataEntrega = new Date(item.dataEntrega);
+          const monthIndex = dataEntrega.getMonth();
+          return monthKeys[monthIndex] === key;
+        }).length;
+      });
+      const nonZero2025 = values2025.filter(v => v > 0);
+      stats.average2025 = nonZero2025.length > 0 ? Math.round((nonZero2025.reduce((sum, v) => sum + v, 0) / nonZero2025.length) * 10) / 10 : 0;
+      stats.peak = Math.max(stats.peak, ...values2025);
+      stats.activeMonths += nonZero2025.length;
     }
 
     // Detectar status do cliente
-    const existsIn2024 = data.visaoGeral2024?.some(c => c.cliente === clientName);
-    const existsIn2025 = data.visaoGeral?.some(c => c.cliente === clientName);
+    const existsIn2024 = items2024.length > 0;
+    const existsIn2025 = items2025.length > 0;
     
     stats.isNewIn2025 = !existsIn2024 && existsIn2025;
     stats.leftIn2025 = existsIn2024 && !existsIn2025;
@@ -860,7 +942,7 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
       )}
 
       {/* Resumo dos Novos Clientes */}
-      {selectedYears.includes('2025') && selectedYears.includes('2024') && data?.visaoGeral && data?.visaoGeral2024 && (
+      {selectedYears.includes('2025') && selectedYears.includes('2024') && data && Array.isArray(data) && (
         <div style={{
           marginTop: '24px',
           padding: '16px',
@@ -878,10 +960,24 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
           </h5>
           
           {(() => {
-            const clientes2024 = data.visaoGeral2024.map(c => c.cliente);
-            const clientes2025 = data.visaoGeral.map(c => c.cliente);
-            const novos = clientes2025.filter(c => !clientes2024.includes(c));
-            const sairam = clientes2024.filter(c => !clientes2025.includes(c));
+            // Extrair clientes únicos de 2024 e 2025 dos dados filtrados
+            const clientes2024 = new Set();
+            const clientes2025 = new Set();
+            
+            data.forEach(item => {
+              const cliente = item.cliente || item.cliente1 || item.cliente2 || '';
+              const dataStr = item.dataEntrega || '';
+              
+              if (dataStr.includes('2024') && cliente.trim()) {
+                clientes2024.add(cliente.trim());
+              }
+              if (dataStr.includes('2025') && cliente.trim()) {
+                clientes2025.add(cliente.trim());
+              }
+            });
+            
+            const novos = Array.from(clientes2025).filter(c => !clientes2024.has(c));
+            const sairam = Array.from(clientes2024).filter(c => !clientes2025.has(c));
 
             return (
               <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>

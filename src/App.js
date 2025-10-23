@@ -29,6 +29,7 @@ import AnalystsCalendar from './components/AnalystsCalendar';
 // Hooks e serviços - 🔧 IMPORT CORRIGIDO
 import { default as useDashboardData } from './hooks/useDashboardData';
 import { DataProcessingService, extractDynamicKPIMetrics } from './services/dataProcessingService'; // 👈 CORRIGIDO: named import
+import { dataStandardizer } from './utils/dataStandardization.js';
 
 function App() {
   const [filters, setFilters] = useState({
@@ -112,8 +113,30 @@ function App() {
         melhorCliente: { cliente: 'N/A', crescimento: 0 },
         melhorMes: 'N/A',
         mesesAnalisados: 0,
+        sourceBreakdown: { sheets: 0, notion: 0, unknown: 0 },
+        sourceDefinitions: null,
+        integrityCheck: null
       };
-    return DataProcessingService.calculateAdvancedMetrics(filteredData, filters);
+    
+    // Calcular métricas tradicionais
+    const traditionalMetrics = DataProcessingService.calculateAdvancedMetrics(filteredData, filters);
+    
+    // Adicionar awareness de fonte
+    const sourceAwareCount = dataStandardizer.getStandardizedCount(filteredData, {
+      year: filters.periodo === '2024' ? '2024' : filters.periodo === '2025' ? '2025' : 'all',
+      type: filters.tipo === 'relatorios' ? 'relatorios' : 'all',
+      cliente: filters.cliente === 'todos' ? 'all' : filters.cliente,
+      showBreakdown: true
+    });
+    
+    const integrityCheck = dataStandardizer.validateDataIntegrity(filteredData);
+    
+    return {
+      ...traditionalMetrics,
+      sourceBreakdown: sourceAwareCount.breakdown,
+      sourceDefinitions: sourceAwareCount.sourceDefinitions,
+      integrityCheck: integrityCheck
+    };
   }, [filteredData, filters]);
 
   // 🆕 KPI Dinâmico - Atualiza em tempo real baseado nos dados consolidados
@@ -826,7 +849,7 @@ function App() {
   const renderCurrentView = () => {
     switch (currentView) {
       case 'heatmap':
-        return <InteractiveHeatmap data={filteredData} onCellClick={handleDrillDown} title="🗺️ Heatmap Interativo de Produção" />;
+        return <InteractiveHeatmap data={filteredData?.originalOrders || []} onCellClick={handleDrillDown} title="🗺️ Heatmap Interativo de Produção" />;
 
       case 'timeline':
         return <EventTimeline data={filteredData} onEventClick={handleEventClick} title="📅 Timeline de Eventos e Marcos" />;
@@ -850,7 +873,7 @@ function App() {
       case 'analytics':
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-            <InteractiveHeatmap data={filteredData} onCellClick={handleDrillDown} title="🗺️ Mapa de Calor - Clientes x Meses" />
+            <InteractiveHeatmap data={filteredData?.originalOrders || []} onCellClick={handleDrillDown} title="🗺️ Mapa de Calor - Clientes x Meses" />
             <EventTimeline data={filteredData} onEventClick={handleEventClick} title="📅 Linha do Tempo de Eventos" />
             <AIInsightsPanel data={filteredData} onInsightClick={handleInsightClick} autoUpdate={false} />
           </div>
