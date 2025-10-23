@@ -360,6 +360,13 @@ const useDashboardData = () => {
       const sheetsRawData = sheetsData?.originalOrders || [];
       const notionRawData = notionData?.originalOrders || [];
       
+      console.log('🔍 [DEBUG] Dados brutos para consolidação:', {
+        sheetsRawLength: sheetsRawData.length,
+        notionRawLength: notionRawData.length,
+        sheetsSample: sheetsRawData.slice(0, 2),
+        notionSample: notionRawData.slice(0, 2)
+      });
+      
       // Aplicar consolidação do DataProcessingService
       const consolidatedRawData = DataProcessingService.consolidateAndNormalize(sheetsRawData, notionRawData);
       
@@ -373,6 +380,15 @@ const useDashboardData = () => {
 
       // Atualiza status de fontes
       setSourceStatus({
+        notionOk: !!(notionData && notionData.visaoGeral),
+        sheetsOk: !!(sheetsData && sheetsData.visaoGeral),
+        notionClients: notionData?.visaoGeral?.length || 0,
+        sheetsClients: sheetsData?.visaoGeral?.length || 0,
+        notionOrders: notionData?.originalOrders?.length || 0,
+        sheetsOrders: sheetsData?.originalOrders?.length || 0,
+      });
+      
+      console.log('🔍 [DEBUG] Status das fontes:', {
         notionOk: !!(notionData && notionData.visaoGeral),
         sheetsOk: !!(sheetsData && sheetsData.visaoGeral),
         notionClients: notionData?.visaoGeral?.length || 0,
@@ -417,6 +433,13 @@ const useDashboardData = () => {
       }));
 
       // Unir contentTypes
+      console.log('🔍 [DEBUG] ContentTypes antes do merge:', {
+        notionContentTypes: notionData?.contentTypes?.length || 0,
+        sheetsContentTypes: sheetsData?.contentTypes?.length || 0,
+        notionSample: notionData?.contentTypes?.slice(0, 3) || [],
+        sheetsSample: sheetsData?.contentTypes?.slice(0, 3) || []
+      });
+      
       const contentTypesMerged = dedupeContentTypes(
         notionData?.contentTypes || [],
         sheetsData?.contentTypes || []

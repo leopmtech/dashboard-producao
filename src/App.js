@@ -148,18 +148,29 @@ function App() {
     // Usar dados consolidados se disponível
     const consolidatedData = data._consolidatedSource || [];
     
+    console.log('🔍 [DEBUG] dataSourcesCount - dados disponíveis:', {
+      hasData: !!data,
+      hasConsolidatedSource: !!data._consolidatedSource,
+      consolidatedLength: consolidatedData.length,
+      originalOrdersLength: data.originalOrders?.length || 0
+    });
+    
     if (consolidatedData.length > 0) {
       const sheets = consolidatedData.filter(item => item._source === 'sheets').length;
       const notion = consolidatedData.filter(item => item._source === 'notion').length;
       const total = consolidatedData.length;
+      
+      console.log('🔍 [DEBUG] Contagem consolidada:', { sheets, notion, total });
       
       return { sheets, notion, total };
     }
     
     // Fallback para dados do dashboard
     const sheets = data.originalOrders?.filter(item => item._source === 'sheets').length || 0;
-    const notion = 0; // Notion não tem originalOrders
+    const notion = data.originalOrders?.filter(item => item._source === 'notion').length || 0;
     const total = data.originalOrders?.length || 0;
+    
+    console.log('🔍 [DEBUG] Contagem fallback:', { sheets, notion, total });
     
     return { sheets, notion, total };
   }, [data]);
@@ -321,20 +332,21 @@ function App() {
             />
             
             <KPICard
-              title="Média de demandas (2024)"
-              value={metrics.mediaMensal2024 || 0}
-              subtitle="Relatórios/mês/cliente"
-              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-              delay="400ms"
-            />
+            title="Média mensal 2024"
+            value={metrics.mediaMensal2024 || 0}
+            subtitle={`${metrics.totalDemandas2024 || 0} demandas em 12 meses`}
+            gradient="linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)"
+            delay="300ms"
+/>
             
+
             <KPICard
-              title="Média de demandas (2025)"
-              value={metrics.mediaMensal2025 || 0}
-              subtitle="Relatórios/mês/cliente (calculado dinamicamente)"
-              gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
-              delay="500ms"
-            />
+            title="Média de demandas (2025)"
+            value={metrics.mediaMensal2025 || 0} // Agora será 95.3
+            subtitle={`${metrics.totalDemandas2025 || 0} demandas em ${metrics.mesesDecorridos2025 || 0} meses`}
+            gradient="linear-gradient(135deg, #FF6B47 0%, #FF8A6B 100%)"
+            delay="500ms"
+/>
             
             <KPICard
               title="Mês com maior número de demandas"

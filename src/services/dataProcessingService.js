@@ -12,7 +12,7 @@ export class DataProcessingService {
     'julho','agosto','setembro','outubro','novembro','dezembro'
   ];
 
-  static GRUPO_EMPRESAS = ['Inpacto','STA','Holding','Listening'];
+  static GRUPO_EMPRESAS = ['Inpacto','in.Pacto','STA','Holding','Listening'];
 
   // 🆕 Conta quantos meses realmente têm dados (>0) em pelo menos um cliente
   static monthsWithData(rows = []) {
@@ -98,6 +98,11 @@ export class DataProcessingService {
   // ==========================================
   static consolidateAndNormalize(sheetsData = [], notionData = []) {
     console.log('🔄 [CONSOLIDATION] Iniciando consolidação...');
+    console.log('🔍 [CONSOLIDATION] Dados de entrada:', {
+      sheetsLength: sheetsData?.length || 0,
+      notionLength: notionData?.length || 0
+    });
+    
     const normalizedSheets = (sheetsData || []).map((item, index) => ({
       ...item,
       _source: 'sheets',
@@ -124,6 +129,15 @@ export class DataProcessingService {
     console.log('✅ [CONSOLIDATION] Concluída:', {
       sheets: normalizedSheets.length,
       notion: normalizedNotion.length,
+      total: consolidated.length
+    });
+    
+    // Debug: verificar se as fontes estão corretas
+    const sheetsCount = consolidated.filter(item => item._source === 'sheets').length;
+    const notionCount = consolidated.filter(item => item._source === 'notion').length;
+    console.log('🔍 [CONSOLIDATION] Verificação de fontes:', {
+      sheetsCount,
+      notionCount,
       total: consolidated.length
     });
 
@@ -184,8 +198,130 @@ export class DataProcessingService {
   }
 
   // ==========================================
-  // MÉTRICAS AVANÇADAS
+  // MÉTRICAS AVANÇADAS - CORREÇÃO DEFINITIVA
   // ==========================================
+  
+  // 🆕 NOVA FUNÇÃO: Cálculo correto da média mensal para 2024 e 2025
+  static calculateCorrectMonthlyAverage(filteredData, filters) {
+    console.log('📊 [MÉTRICAS CORRIGIDAS] Calculando médias mensais para 2024 e 2025...');
+    
+    if (!filteredData || !Array.isArray(filteredData)) {
+      return { 
+        mediaMensal2024: 0,
+        mediaMensal2025: 0 
+      };
+    }
+
+    const currentDate = new Date();
+    const currentYear = currentDate.getFullYear();
+    const currentMonth = currentDate.getMonth() + 1; // Janeiro = 1, Outubro = 10
+
+    // ✅ FILTRAR DADOS DE 2024
+    const data2024 = filteredData.filter(item => {
+      if (!item.dataEntrega) return false;
+      
+      try {
+        let year;
+        if (typeof item.dataEntrega === 'string') {
+          // Formato YYYY-MM-DD ou DD/MM/YYYY
+          if (item.dataEntrega.includes('-')) {
+            year = parseInt(item.dataEntrega.split('-')[0]);
+          } else if (item.dataEntrega.includes('/')) {
+            const parts = item.dataEntrega.split('/');
+            year = parseInt(parts[2]); // DD/MM/YYYY
+          }
+        } else {
+          year = new Date(item.dataEntrega).getFullYear();
+        }
+        
+        return year === 2024;
+      } catch (error) {
+        return false;
+      }
+    });
+
+    // ✅ FILTRAR DADOS DE 2025
+    const data2025 = filteredData.filter(item => {
+      if (!item.dataEntrega) return false;
+      
+      try {
+        let year;
+        if (typeof item.dataEntrega === 'string') {
+          // Formato YYYY-MM-DD ou DD/MM/YYYY
+          if (item.dataEntrega.includes('-')) {
+            year = parseInt(item.dataEntrega.split('-')[0]);
+          } else if (item.dataEntrega.includes('/')) {
+            const parts = item.dataEntrega.split('/');
+            year = parseInt(parts[2]); // DD/MM/YYYY
+          }
+        } else {
+          year = new Date(item.dataEntrega).getFullYear();
+        }
+        
+        return year === 2025;
+      } catch (error) {
+        return false;
+      }
+    });
+
+    // ✅ CÁLCULO CORRETO PARA 2024
+    const totalDemandas2024 = data2024.length;
+    const mesesTotais2024 = 12; // 2024 completo = 12 meses
+    
+    const mediaMensal2024 = mesesTotais2024 > 0 ? 
+      Number((totalDemandas2024 / mesesTotais2024).toFixed(1)) : 0;
+
+    // ✅ CÁLCULO CORRETO PARA 2025
+    const totalDemandas2025 = data2025.length;
+    const mesesDecorridos2025 = currentYear === 2025 ? currentMonth : 12;
+    
+    const mediaMensal2025 = mesesDecorridos2025 > 0 ? 
+      Number((totalDemandas2025 / mesesDecorridos2025).toFixed(1)) : 0;
+
+    // ✅ CÁLCULO DE CRESCIMENTO (OPCIONAL)
+    const crescimento = mediaMensal2024 > 0 ? 
+      Number(((mediaMensal2025 - mediaMensal2024) / mediaMensal2024 * 100).toFixed(1)) : 0;
+
+    console.log('📊 [CORREÇÕES APLICADAS] Novos cálculos:', {
+      '2024': {
+        totalDemandas: totalDemandas2024,
+        meses: mesesTotais2024,
+        mediaMensal: mediaMensal2024,
+        calculo: `${totalDemandas2024} / ${mesesTotais2024} = ${mediaMensal2024}`
+      },
+      '2025': {
+        totalDemandas: totalDemandas2025,
+        meses: mesesDecorridos2025,
+        mediaMensal: mediaMensal2025,
+        calculo: `${totalDemandas2025} / ${mesesDecorridos2025} = ${mediaMensal2025}`
+      },
+      crescimento: `${crescimento}%`
+    });
+
+    return {
+      // ✅ MÉDIAS MENSAIS CORRIGIDAS
+      mediaMensal2024,
+      mediaMensal2025,
+      
+      // ✅ DADOS DETALHADOS
+      totalDemandas2024,
+      totalDemandas2025,
+      mesesTotais2024,
+      mesesDecorridos2025,
+      
+      // ✅ CRESCIMENTO
+      crescimento,
+      
+      // ✅ CLIENTES ÚNICOS
+      totalClientes2024: new Set(data2024.map(item => item.cliente).filter(Boolean)).size,
+      totalClientes2025: new Set(data2025.map(item => item.cliente).filter(Boolean)).size,
+      
+      // ✅ OUTRAS MÉTRICAS
+      melhorAno: mediaMensal2025 > mediaMensal2024 ? '2025' : '2024',
+      diferencaAbsoluta: Number((mediaMensal2025 - mediaMensal2024).toFixed(1))
+    };
+  }
+
   static calculateAdvancedMetrics(data, filters = {}) {
     console.log('📊 [MÉTRICAS] Calculando (advanced)...');
     if (!data) return this.getEmptyMetrics();
@@ -274,17 +410,18 @@ export class DataProcessingService {
 
       const totalClientes2025 = clientesUnicos2025.size;
 
-      // Cálculo simples: total de demandas / total de clientes / meses
-      const mediaReal2025 = totalClientes2025 > 0 && mesesAtuais > 0 
-        ? totalDemandas2025 / totalClientes2025 / mesesAtuais 
+      // ✅ CORREÇÃO: Cálculo correto da média mensal (SEM dividir por clientes)
+      const mediaReal2025 = mesesAtuais > 0 
+        ? totalDemandas2025 / mesesAtuais 
         : 0;
 
-      console.log('🧮 [CÁLCULO SIMPLES] Resultado:', {
+      console.log('🧮 [CÁLCULO CORRIGIDO] Resultado:', {
         totalDemandas2025,
         totalClientes2025,
         mesesAtuais,
         mediaReal2025: mediaReal2025.toFixed(2),
-        calculo: `${totalDemandas2025} / ${totalClientes2025} / ${mesesAtuais} = ${mediaReal2025.toFixed(2)}`,
+        calculoCorreto: `${totalDemandas2025} / ${mesesAtuais} = ${mediaReal2025.toFixed(2)}`,
+        calculoAnteriorErrado: `${totalDemandas2025} / ${totalClientes2025} / ${mesesAtuais} = ${(totalDemandas2025 / totalClientes2025 / mesesAtuais).toFixed(2)}`,
         demandasPorMes,
         clientesUnicos: Array.from(clientesUnicos2025).slice(0, 10)
       });
@@ -294,7 +431,8 @@ export class DataProcessingService {
         'Total Demandas 2025': totalDemandas2025,
         'Total Clientes Únicos': totalClientes2025,
         'Meses Atuais': mesesAtuais,
-        'Média Calculada': mediaReal2025,
+        'Média Calculada (CORRIGIDA)': mediaReal2025,
+        'Média Anterior (ERRADA)': totalClientes2025 > 0 ? (totalDemandas2025 / totalClientes2025 / mesesAtuais).toFixed(2) : 0,
         'Distribuição por Mês': JSON.stringify(demandasPorMes, null, 2),
         'Primeiros 15 Clientes': Array.from(clientesUnicos2025).slice(0, 15)
       });
@@ -304,10 +442,12 @@ export class DataProcessingService {
         'Total Demandas 2025': totalDemandas2025,
         'Total Clientes Únicos': totalClientes2025,
         'Meses Atuais': mesesAtuais,
-        'Média Calculada': mediaReal2025,
+        'Média Calculada (CORRIGIDA)': mediaReal2025,
+        'Média Anterior (ERRADA)': totalClientes2025 > 0 ? (totalDemandas2025 / totalClientes2025 / mesesAtuais).toFixed(2) : 0,
         'Distribuição por Mês': demandasPorMes,
         'Todos os Clientes': Array.from(clientesUnicos2025),
-        'Cálculo Detalhado': `${totalDemandas2025} / ${totalClientes2025} / ${mesesAtuais} = ${mediaReal2025.toFixed(2)}`
+        'Cálculo Correto': `${totalDemandas2025} / ${mesesAtuais} = ${mediaReal2025.toFixed(2)}`,
+        'Cálculo Anterior (Errado)': `${totalDemandas2025} / ${totalClientes2025} / ${mesesAtuais} = ${(totalDemandas2025 / totalClientes2025 / mesesAtuais).toFixed(2)}`
       }, null, 2));
 
       // Verificação adicional: se ainda estiver baixo, vamos investigar
@@ -383,10 +523,33 @@ export class DataProcessingService {
         totalClientes2025,
         mesesAtuais,
         mediaReal2025: this.formatDisplayValue(mediaReal2025, 1),
-        calculo: `${totalDemandas2025} / ${totalClientes2025} / ${mesesAtuais} = ${mediaReal2025.toFixed(2)}`
+        calculoCorreto: `${totalDemandas2025} / ${mesesAtuais} = ${mediaReal2025.toFixed(2)}`,
+        calculoAnterior: `${totalDemandas2025} / ${totalClientes2025} / ${mesesAtuais} = ${(totalDemandas2025 / totalClientes2025 / mesesAtuais).toFixed(2)}`
       });
 
-      // Manter cálculo original para 2024 e outros dados
+      // ✅ CORREÇÃO: Calcular médias corretas para 2024 e 2025
+      // Filtrar dados de 2024
+      const dados2024 = dadosOriginais.filter(order => {
+        const dataEntrega = order.dataEntrega || order.DataEntrega || order.data_entrega;
+        if (!dataEntrega) return false;
+        
+        try {
+          const data = new Date(dataEntrega);
+          return data.getFullYear() === 2024;
+        } catch {
+          return false;
+        }
+      });
+
+      const totalDemandas2024 = dados2024.length;
+      const mesesTotais2024 = 12; // 2024 completo
+      const mediaReal2024 = mesesTotais2024 > 0 ? totalDemandas2024 / mesesTotais2024 : 0;
+
+      // Usar os cálculos corretos
+      const overallAvg2024 = mediaReal2024;
+      const overallAvg2025 = mediaReal2025;
+
+      // ✅ CORREÇÃO: Processar trendData para calcular mesesAnalisados e melhorMes
       trendData.forEach((item, index) => {
         sumAvg2024 += item.value2024 || 0;
         if (index <= actualCurrentMonthIndex && item.value2025 !== null) {
@@ -399,8 +562,22 @@ export class DataProcessingService {
         }
       });
 
-      const overallAvg2024 = sumAvg2024 / 12;
-      const overallAvg2025 = mediaReal2025; // Usar o cálculo real
+      console.log('📊 [CÁLCULOS CORRIGIDOS] Comparação 2024 vs 2025:', {
+        '2024': {
+          totalDemandas: totalDemandas2024,
+          meses: mesesTotais2024,
+          mediaMensal: mediaReal2024.toFixed(1),
+          calculo: `${totalDemandas2024} / ${mesesTotais2024} = ${mediaReal2024.toFixed(1)}`
+        },
+        '2025': {
+          totalDemandas: totalDemandas2025,
+          meses: mesesAtuais,
+          mediaMensal: mediaReal2025.toFixed(1),
+          calculo: `${totalDemandas2025} / ${mesesAtuais} = ${mediaReal2025.toFixed(1)}`
+        },
+        mesesAnalisados: monthsWithActualData,
+        melhorMes: melhorMes
+      });
 
       const crescimento = overallAvg2024 > 0
         ? ((overallAvg2025 - overallAvg2024) / overallAvg2024) * 100
@@ -428,6 +605,11 @@ export class DataProcessingService {
         mediaMensal2025: this.formatDisplayValue(overallAvg2025, 1),
         mediaMensal: this.formatDisplayValue(overallAvg2025, 1),
         produtividade: this.formatDisplayValue(overallAvg2025, 1),
+        // 🆕 NOVAS PROPRIEDADES CORRIGIDAS
+        totalDemandas2024: totalDemandas2024,
+        totalDemandas2025: totalDemandas2025,
+        mesesTotais2024: mesesTotais2024,
+        mesesDecorridos2025: mesesAtuais,
         melhorCliente: topCliente ? {
           cliente: topCliente.cliente,
           total: topCliente.total || 0,
@@ -938,12 +1120,13 @@ export class DataProcessingService {
     }
   }
 
-  // 🆕 CORRIGIDO: Ranking sem corte de top 10 + flags de grupo
+  // 🆕 CORRIGIDO: Ranking com clientes únicos e separação correta de demandas
   // - filters.onlyGroup === true -> somente Inpacto/STA/Holding/Listening
   // - filters.excludeGroup === true -> exclui Inpacto/STA/Holding/Listening
   static processRankingData(data, filters = {}) {
     const currentData = data.visaoGeral || [];
     const data2024 = data.visaoGeral2024 || [];
+    const originalOrders = data.originalOrders || [];
     const periodo = filters.periodo || 'ambos';
     const onlyGroup = !!filters.onlyGroup;
     const excludeGroup = !!filters.excludeGroup;
@@ -958,56 +1141,130 @@ export class DataProcessingService {
       periodo,
       currentData: currentData.length,
       data2024: data2024.length,
+      originalOrders: originalOrders.length,
       onlyGroup,
       excludeGroup
     });
 
+    // ✅ NOVA LÓGICA: Processar clientes únicos a partir das ordens originais
+    const processarClientesUnicos = (orders) => {
+      const clientesMap = new Map();
+      
+      orders.forEach(order => {
+        const clienteValue = order.cliente1 || order.cliente || order.Cliente;
+        if (!clienteValue) return;
+        
+        const clienteStr = String(clienteValue).trim();
+        
+        // Separar clientes combinados (ex: "MIDR, in.Pacto")
+        if (clienteStr.includes(',')) {
+          const clientes = clienteStr.split(',').map(c => c.trim()).filter(Boolean);
+          clientes.forEach(cliente => {
+            if (!clientesMap.has(cliente)) {
+              clientesMap.set(cliente, {
+                cliente,
+                total2024: 0,
+                total2025: 0,
+                demandas: 0
+              });
+            }
+            clientesMap.get(cliente).demandas++;
+            
+            // Contar por ano baseado na data de entrega
+            const dataEntrega = order.dataEntrega || order.DataEntrega || order.data_entrega;
+            if (dataEntrega) {
+              try {
+                const data = new Date(dataEntrega);
+                const ano = data.getFullYear();
+                if (ano === 2024) {
+                  clientesMap.get(cliente).total2024++;
+                } else if (ano === 2025) {
+                  clientesMap.get(cliente).total2025++;
+                }
+              } catch (error) {
+                // Se não conseguir parsear a data, conta como 2025 por padrão
+                clientesMap.get(cliente).total2025++;
+              }
+            } else {
+              // Se não tem data, conta como 2025 por padrão
+              clientesMap.get(cliente).total2025++;
+            }
+          });
+        } else {
+          // Cliente único
+          if (!clientesMap.has(clienteStr)) {
+            clientesMap.set(clienteStr, {
+              cliente: clienteStr,
+              total2024: 0,
+              total2025: 0,
+              demandas: 0
+            });
+          }
+          clientesMap.get(clienteStr).demandas++;
+          
+          // Contar por ano baseado na data de entrega
+          const dataEntrega = order.dataEntrega || order.DataEntrega || order.data_entrega;
+          if (dataEntrega) {
+            try {
+              const data = new Date(dataEntrega);
+              const ano = data.getFullYear();
+              if (ano === 2024) {
+                clientesMap.get(clienteStr).total2024++;
+              } else if (ano === 2025) {
+                clientesMap.get(clienteStr).total2025++;
+              }
+            } catch (error) {
+              // Se não conseguir parsear a data, conta como 2025 por padrão
+              clientesMap.get(clienteStr).total2025++;
+            }
+          } else {
+            // Se não tem data, conta como 2025 por padrão
+            clientesMap.get(clienteStr).total2025++;
+          }
+        }
+      });
+      
+      return Array.from(clientesMap.values());
+    };
+
     if (periodo === 'ambos') {
-      // Dados 2025 e 2024 (se vazios, mantém mocks do seu original)
-      const mock2024 = [
-        { cliente: 'ANP', total: 216 },
-        { cliente: 'CFQ', total: 93 },
-        { cliente: 'VALE', total: 75 },
-        { cliente: 'GOVGO', total: 54 },
-        { cliente: 'MS', total: 43 },
-        { cliente: 'PETROBRAS', total: 42 }
-      ];
-      const dados2025 = currentData.length > 0 ? currentData : [
-        { cliente: 'ANP', janeiro: 47, fevereiro: 42, marco: 42, abril: 42, maio: 43, total: 216 },
-        { cliente: 'CFQ', janeiro: 20, fevereiro: 18, marco: 20, abril: 20, maio: 15, total: 93 },
-        { cliente: 'VALE', janeiro: 15, fevereiro: 12, marco: 15, abril: 15, maio: 18, total: 75 },
-        { cliente: 'GOVGO', janeiro: 12, fevereiro: 10, marco: 12, abril: 12, maio: 8, total: 54 },
-        { cliente: 'MS', janeiro: 1,  fevereiro: 3,  marco: 0,  abril: 1,  maio: 38, total: 43 },
-        { cliente: 'PETROBRAS', janeiro: 8,  fevereiro: 8,  marco: 8,  abril: 8,  maio: 10, total: 42 }
-      ];
-      const dados2024 = data2024.length > 0 ? data2024 : mock2024;
+      // ✅ USAR DADOS REAIS DAS ORDENS ORIGINAIS
+      const clientesUnicos = processarClientesUnicos(originalOrders);
+      
+      console.log('🏆 [RANKING] Clientes únicos processados:', {
+        total: clientesUnicos.length,
+        sample: clientesUnicos.slice(0, 5).map(c => ({
+          cliente: c.cliente,
+          total2024: c.total2024,
+          total2025: c.total2025,
+          demandas: c.demandas
+        }))
+      });
 
       // Divisor dinâmico: 12 para 2024, meses com dados para 2025
       const divisor2024 = 12;
-      const divisor2025 = this.monthsWithData(dados2025);
+      const divisor2025 = this.monthsWithData(currentData) || 10; // Fallback para 10 meses
 
-      let result = dados2025.map(c25 => {
-        const c24 = dados2024.find(c => c.cliente === c25.cliente);
-        const total2024 = c24?.total || 0;
-        const total2025 = c25.total || 0;
-        const media2024 = Math.round((total2024 / divisor2024) * 10) / 10;
-        const media2025 = Math.round((total2025 / Math.max(divisor2025,1)) * 10) / 10;
+      let result = clientesUnicos.map(cliente => {
+        const media2024 = Math.round((cliente.total2024 / divisor2024) * 10) / 10;
+        const media2025 = Math.round((cliente.total2025 / Math.max(divisor2025, 1)) * 10) / 10;
 
         const crescimento = media2024 > 0
           ? Math.round(((media2025 - media2024) / media2024) * 100)
           : (media2025 > 0 ? 100 : 0);
 
         return {
-          cliente: c25.cliente,
-          total2024,
-          total2025,
+          cliente: cliente.cliente,
+          total2024: cliente.total2024,
+          total2025: cliente.total2025,
           media2024,
           media2025,
           crescimento,
           categoria: this.categorizeGrowth(crescimento),
           valor: media2025,
           total: media2025,
-          media: media2025
+          media: media2025,
+          demandas: cliente.demandas
         };
       });
 
@@ -1020,16 +1277,22 @@ export class DataProcessingService {
       return result;
     } else {
       // Ranking para um período específico
-      const base = periodo === '2024' ? (data2024 || []) : (currentData || []);
-      const divisor = periodo === '2024' ? 12 : this.monthsWithData(base);
+      const clientesUnicos = processarClientesUnicos(originalOrders);
+      const divisor = periodo === '2024' ? 12 : (this.monthsWithData(currentData) || 10);
 
-      let result = base
-        .map(c => ({
-          cliente: c.cliente,
-          total: c.total || 0,
-          media: Math.round(((c.total || 0) / Math.max(divisor,1)) * 10) / 10,
-          valor: c.total || 0
-        }))
+      let result = clientesUnicos
+        .map(c => {
+          const total = periodo === '2024' ? c.total2024 : c.total2025;
+          const media = Math.round((total / Math.max(divisor, 1)) * 10) / 10;
+          
+          return {
+            cliente: c.cliente,
+            total,
+            media,
+            valor: total,
+            demandas: c.demandas
+          };
+        })
         .filter(i => i.total > 0);
 
       // Filtros de grupo e sem corte de 10
@@ -1146,3 +1409,124 @@ export class DataProcessingService {
     return Math.round(((media2025 - media2024) / media2024) * 100);
   }
 }
+
+// 🆕 EXPORTAÇÃO DA FUNÇÃO CORRIGIDA PARA USO DIRETO
+export const calculateAdvancedMetrics = (filteredData, filters) => {
+  console.log('📊 [MÉTRICAS CORRIGIDAS] Calculando médias mensais para 2024 e 2025...');
+  
+  if (!filteredData || !Array.isArray(filteredData)) {
+    return { 
+      mediaMensal2024: 0,
+      mediaMensal2025: 0 
+    };
+  }
+
+  const currentDate = new Date();
+  const currentYear = currentDate.getFullYear();
+  const currentMonth = currentDate.getMonth() + 1; // Janeiro = 1, Outubro = 10
+
+  // ✅ FILTRAR DADOS DE 2024
+  const data2024 = filteredData.filter(item => {
+    if (!item.dataEntrega) return false;
+    
+    try {
+      let year;
+      if (typeof item.dataEntrega === 'string') {
+        // Formato YYYY-MM-DD ou DD/MM/YYYY
+        if (item.dataEntrega.includes('-')) {
+          year = parseInt(item.dataEntrega.split('-')[0]);
+        } else if (item.dataEntrega.includes('/')) {
+          const parts = item.dataEntrega.split('/');
+          year = parseInt(parts[2]); // DD/MM/YYYY
+        }
+      } else {
+        year = new Date(item.dataEntrega).getFullYear();
+      }
+      
+      return year === 2024;
+    } catch (error) {
+      return false;
+    }
+  });
+
+  // ✅ FILTRAR DADOS DE 2025
+  const data2025 = filteredData.filter(item => {
+    if (!item.dataEntrega) return false;
+    
+    try {
+      let year;
+      if (typeof item.dataEntrega === 'string') {
+        // Formato YYYY-MM-DD ou DD/MM/YYYY
+        if (item.dataEntrega.includes('-')) {
+          year = parseInt(item.dataEntrega.split('-')[0]);
+        } else if (item.dataEntrega.includes('/')) {
+          const parts = item.dataEntrega.split('/');
+          year = parseInt(parts[2]); // DD/MM/YYYY
+        }
+      } else {
+        year = new Date(item.dataEntrega).getFullYear();
+      }
+      
+      return year === 2025;
+    } catch (error) {
+      return false;
+    }
+  });
+
+  // ✅ CÁLCULO CORRETO PARA 2024
+  const totalDemandas2024 = data2024.length;
+  const mesesTotais2024 = 12; // 2024 completo = 12 meses
+  
+  const mediaMensal2024 = mesesTotais2024 > 0 ? 
+    Number((totalDemandas2024 / mesesTotais2024).toFixed(1)) : 0;
+
+  // ✅ CÁLCULO CORRETO PARA 2025
+  const totalDemandas2025 = data2025.length;
+  const mesesDecorridos2025 = currentYear === 2025 ? currentMonth : 12;
+  
+  const mediaMensal2025 = mesesDecorridos2025 > 0 ? 
+    Number((totalDemandas2025 / mesesDecorridos2025).toFixed(1)) : 0;
+
+  // ✅ CÁLCULO DE CRESCIMENTO (OPCIONAL)
+  const crescimento = mediaMensal2024 > 0 ? 
+    Number(((mediaMensal2025 - mediaMensal2024) / mediaMensal2024 * 100).toFixed(1)) : 0;
+
+  console.log('📊 [CORREÇÕES APLICADAS] Novos cálculos:', {
+    '2024': {
+      totalDemandas: totalDemandas2024,
+      meses: mesesTotais2024,
+      mediaMensal: mediaMensal2024,
+      calculo: `${totalDemandas2024} / ${mesesTotais2024} = ${mediaMensal2024}`
+    },
+    '2025': {
+      totalDemandas: totalDemandas2025,
+      meses: mesesDecorridos2025,
+      mediaMensal: mediaMensal2025,
+      calculo: `${totalDemandas2025} / ${mesesDecorridos2025} = ${mediaMensal2025}`
+    },
+    crescimento: `${crescimento}%`
+  });
+
+  return {
+    // ✅ MÉDIAS MENSAIS CORRIGIDAS
+    mediaMensal2024,
+    mediaMensal2025,
+    
+    // ✅ DADOS DETALHADOS
+    totalDemandas2024,
+    totalDemandas2025,
+    mesesTotais2024,
+    mesesDecorridos2025,
+    
+    // ✅ CRESCIMENTO
+    crescimento,
+    
+    // ✅ CLIENTES ÚNICOS
+    totalClientes2024: new Set(data2024.map(item => item.cliente).filter(Boolean)).size,
+    totalClientes2025: new Set(data2025.map(item => item.cliente).filter(Boolean)).size,
+    
+    // ✅ OUTRAS MÉTRICAS
+    melhorAno: mediaMensal2025 > mediaMensal2024 ? '2025' : '2024',
+    diferencaAbsoluta: Number((mediaMensal2025 - mediaMensal2024).toFixed(1))
+  };
+};
