@@ -479,7 +479,7 @@ const useDashboardData = () => {
       console.log('📊 [NOTION ONLY] Carregando dados apenas do Notion...');
 
       // ✅ USAR APENAS NOTION
-      const notionResponse = await fetch('http://localhost:8000/api/notion/orders');
+      const notionResponse = await fetch('/.netlify/functions/notion?route=orders');
       
       if (!notionResponse.ok) {
         throw new Error(`Erro na API Notion: ${notionResponse.status}`);

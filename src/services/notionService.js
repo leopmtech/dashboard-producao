@@ -14,8 +14,11 @@ class NotionService {
 
     // Se você ainda não setou NOTION_DATABASE_ID no server/.env,
     // pode passar ?dbName=MinhaBase pelo frontend:
-    const qs = dbName ? `?dbName=${encodeURIComponent(dbName)}` : '';
-    const res = await fetch(`/api/notion/orders${qs}`);
+    const qsParts = [];
+    qsParts.push('route=orders');
+    if (dbName) qsParts.push(`dbName=${encodeURIComponent(dbName)}`);
+    const qs = qsParts.length ? `?${qsParts.join('&')}` : '';
+    const res = await fetch(`/.netlify/functions/notion${qs}`);
 
     if (!res.ok) {
       const errTxt = await res.text().catch(() => '');
