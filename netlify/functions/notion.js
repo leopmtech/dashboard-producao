@@ -29,6 +29,11 @@ function buildNotionClient() {
 }
 
 async function fetchAllFromDatabase(notion, databaseId) {
+  if (!notion || !notion.databases || typeof notion.databases.query !== 'function') {
+    const err = new Error('Notion client inválido: databases.query indisponível');
+    err.code = 'CLIENT_BAD_SHAPE';
+    throw err;
+  }
   const pages = [];
   let cursor = undefined;
   do {
@@ -46,6 +51,12 @@ async function fetchNotionData(notion, databaseId) {
     throw err;
   }
 
+  if (!notion || !notion.databases || typeof notion.databases.query !== 'function') {
+    const err = new Error('Notion client inválido: databases.query indisponível');
+    err.code = 'CLIENT_BAD_SHAPE';
+    throw err;
+  }
+
   const results = [];
   let hasMore = true;
   let startCursor = undefined;
@@ -53,12 +64,23 @@ async function fetchNotionData(notion, databaseId) {
 
   while (hasMore && pageCount < 50) {
     pageCount += 1;
-    const response = await notion.databases.query({
-      database_id: databaseId,
-      start_cursor: startCursor,
-      page_size: 100,
-      sorts: [{ property: 'Data de entrega', direction: 'descending' }]
-    });
+    let response;
+    try {
+      // Tentativa com ordenação pelo campo "Data de entrega"
+      response = await notion.databases.query({
+        database_id: databaseId,
+        start_cursor: startCursor,
+        page_size: 100,
+        sorts: [{ property: 'Data de entrega', direction: 'descending' }]
+      });
+    } catch (err) {
+      // Fallback: sem sorts (caso o campo não exista ou a permissão não permita sort)
+      response = await notion.databases.query({
+        database_id: databaseId,
+        start_cursor: startCursor,
+        page_size: 100
+      });
+    }
     results.push(...response.results);
     hasMore = response.has_more;
     startCursor = response.next_cursor;
