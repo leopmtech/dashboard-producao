@@ -1,0 +1,3 @@
+# Este diretório armazena os relatórios gerados pela análise
+# Os relatórios serão salvos com formato: analysis_[timestamp].json
+

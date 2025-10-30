@@ -1,0 +1,83 @@
+// server/index.js
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const { Client } = require('@notionhq/client');
+const { rowToOrder, summarize, groupByClient, extractUniqueContentTypes } = require('./notionAdapter');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const notion = new Client({ auth: process.env.NOTION_TOKEN });
+const DB_ID = process.env.NOTION_DATABASE_ID;
+
+async function findDatabaseByName(name) {
+  const res = await notion.search({ query: name, filter: { property: 'object', value: 'database' } });
+  return res.results?.[0]?.id || null;
+}
+
+async function fetchAllFromDatabase(databaseId) {
+  const pages = [];
+  let cursor = undefined;
+  do {
+    const res = await notion.databases.query({
+      database_id: databaseId,
+      start_cursor: cursor,
+      page_size: 100,
+      sorts: [{ property: 'last_edited_time', direction: 'descending' }],
+    });
+    pages.push(...res.results);
+    cursor = res.has_more ? res.next_cursor : undefined;
+  } while (cursor);
+  return pages;
+}
+
+app.get('/api/notion/orders', async (req, res) => {
+  try {
+    let databaseId = DB_ID;
+    if (!databaseId && req.query.dbName) {
+      databaseId = await findDatabaseByName(req.query.dbName);
+      if (!databaseId) return res.status(400).json({ error: 'Database não encontrada por nome' });
+    }
+    if (!databaseId) return res.status(400).json({ error: 'NOTION_DATABASE_ID não configurado' });
+
+    const pages = await fetchAllFromDatabase(databaseId);
+    const orders = pages.map(rowToOrder);
+
+    const summary = summarize(orders);
+    const clientsData = groupByClient(orders);
+    const contentTypes = extractUniqueContentTypes(orders);
+
+    const dashboardData = {
+      totalSheets: 1,
+      loadedAt: new Date().toISOString(),
+      sheetName: 'notion',
+      originalOrders: orders,
+      metrics: summary,
+      contentTypes,
+      visaoGeral: clientsData,
+      visaoGeral2024: clientsData.filter(c => c['2024'] > 0),
+      diarios: clientsData,
+      diarios2024: clientsData.filter(c => c['2024'] > 0),
+      semanais: clientsData,
+      semanais2024: clientsData.filter(c => c['2024'] > 0),
+      mensais: clientsData,
+      mensais2024: clientsData.filter(c => c['2024'] > 0),
+      especiais: clientsData,
+      especiais2024: clientsData.filter(c => c['2024'] > 0),
+      diagnosticos: clientsData,
+      diagnosticos2024: clientsData.filter(c => c['2024'] > 0),
+      design: clientsData,
+    };
+
+    res.json(dashboardData);
+  } catch (err) {
+    console.error('❌ Notion API error:', err);
+    res.status(500).json({ error: err.message || 'Erro ao buscar dados do Notion' });
+  }
+});
+
+// 🔥 MUDANÇA AQUI: Alterar porta padrão de 4000 para 8000
+const port = process.env.PORT || 8000;
+app.listen(port, () => console.log(`🚀 Notion API server rodando em http://localhost:${port}`));
