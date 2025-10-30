@@ -21,8 +21,12 @@ class NotionService {
     const res = await fetch(`/.netlify/functions/notion${qs}`);
 
     if (!res.ok) {
-      const errTxt = await res.text().catch(() => '');
-      throw new Error(`Notion API error [${res.status}]: ${errTxt}`);
+      const raw = await res.text().catch(() => '');
+      let details = {};
+      try { details = JSON.parse(raw); } catch (_) {}
+      const code = details.code ? ` code=${details.code}` : '';
+      const msg = details.error || raw || 'unknown error';
+      throw new Error(`Notion API error [${res.status}]${code}: ${msg}`);
     }
 
     const json = await res.json();

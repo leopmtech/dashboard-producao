@@ -10,16 +10,22 @@ const CORS_HEADERS = {
   'Content-Type': 'application/json; charset=utf-8'
 };
 
+function getEnv(name, fallbackName) {
+  return process.env[name] || process.env[fallbackName];
+}
+
 function buildNotionClient() {
+  const token = getEnv('NOTION_TOKEN', 'REACT_APP_NOTION_TOKEN');
+  const dbId = getEnv('NOTION_DATABASE_ID', 'REACT_APP_NOTION_DATABASE_ID');
   const missing = [];
-  if (!process.env.NOTION_TOKEN) missing.push('NOTION_TOKEN');
-  if (!process.env.NOTION_DATABASE_ID) missing.push('NOTION_DATABASE_ID');
+  if (!token) missing.push('NOTION_TOKEN');
+  if (!dbId) missing.push('NOTION_DATABASE_ID');
   if (missing.length) {
     const error = new Error(`Variáveis ausentes: ${missing.join(', ')}`);
     error.code = 'ENV_VARS_MISSING';
     throw error;
   }
-  return new Client({ auth: process.env.NOTION_TOKEN });
+  return { client: new Client({ auth: token }), databaseId: dbId };
 }
 
 async function fetchAllFromDatabase(notion, databaseId) {
@@ -67,10 +73,10 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    const notion = buildNotionClient();
+    const { client: notion, databaseId: defaultDb } = buildNotionClient();
     const params = event.queryStringParameters || {};
     const route = params.route || 'orders';
-    let databaseId = process.env.NOTION_DATABASE_ID;
+    let databaseId = params.dbName ? null : defaultDb;
 
     // opcional: permitir busca por nome via dbName
     if (params.dbName) {
@@ -92,7 +98,7 @@ exports.handler = async (event, context) => {
     }
 
     if (route === 'orders' || route === 'orders-debug') {
-      const results = await fetchNotionData(notion, databaseId);
+      const results = await fetchNotionData(notion, databaseId || defaultDb);
       if (route === 'orders-debug') {
         return { statusCode: 200, headers: CORS_HEADERS, body: JSON.stringify({ count: results.length }) };
       }
