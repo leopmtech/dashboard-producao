@@ -129,11 +129,11 @@ exports.handler = async (event, context) => {
 
     return { statusCode: 404, headers: CORS_HEADERS, body: JSON.stringify({ error: 'Route not found' }) };
   } catch (error) {
-    const status = (error && (error.status || (error.code === 'NO_DB_ID' ? 400 : 500))) || 500;
+    const status = (error && (error.status || (error.code === 'NO_DB_ID' ? 400 : (error.code === 'ENV_VARS_MISSING' ? 400 : 500)))) || 500;
     return {
       statusCode: status,
       headers: CORS_HEADERS,
-      body: JSON.stringify({ success: false, error: error.message })
+      body: JSON.stringify({ success: false, error: error.message, code: error.code })
     };
   }
 };
