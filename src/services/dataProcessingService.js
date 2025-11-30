@@ -14,6 +14,89 @@ export class DataProcessingService {
 
   static GRUPO_EMPRESAS = ['in.Pacto','STA','Holding','Listening'];
 
+  // ==========================================
+  // FILTRO DE EXCLUSÃO POR TAGS
+  // ==========================================
+  // Tags que devem ser excluídas das métricas de produtividade
+  static EXCLUDED_TAGS = ['Documentos Internos'];
+
+  /**
+   * Verifica se uma tarefa contém alguma tag de exclusão (case-insensitive)
+   * @param {Object} task - Tarefa a ser verificada
+   * @returns {boolean} - true se a tarefa deve ser excluída
+   */
+  static shouldExcludeTask(task) {
+    if (!task) return false;
+
+    try {
+      // Obter tags da tarefa (pode estar em diferentes formatos)
+      let tags = [];
+      
+      // Formato 1: Array de tags
+      if (Array.isArray(task.tags)) {
+        tags = task.tags.filter(t => t != null && t !== '');
+      }
+      // Formato 2: String de tags separadas por vírgula
+      else if (typeof task.tagsString === 'string' && task.tagsString.trim()) {
+        tags = task.tagsString.split(',').map(t => t.trim()).filter(Boolean);
+      }
+      // Formato 3: Campo "Tags" como string
+      else if (typeof task.Tags === 'string' && task.Tags.trim()) {
+        tags = task.Tags.split(',').map(t => t.trim()).filter(Boolean);
+      }
+
+      // Se não há tags, não excluir
+      if (tags.length === 0) return false;
+
+      // Verificar se alguma tag corresponde às tags de exclusão (case-insensitive)
+      const taskTagsLower = tags.map(t => String(t).toLowerCase().trim()).filter(Boolean);
+      const excludedTagsLower = this.EXCLUDED_TAGS.map(t => String(t).toLowerCase().trim());
+
+      const hasExcludedTag = taskTagsLower.some(taskTag => 
+        excludedTagsLower.some(excludedTag => taskTag === excludedTag)
+      );
+
+      if (hasExcludedTag) {
+        console.log(`🚫 [EXCLUSÃO] Tarefa ${task.id} excluída por tag:`, tags);
+      }
+
+      return hasExcludedTag;
+    } catch (error) {
+      // Em caso de erro ao processar tags, não excluir a tarefa (fail-safe)
+      console.warn('⚠️ [FILTRO TAGS] Erro ao verificar tags da tarefa:', task?.id, error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Filtra tarefas excluindo aquelas com tags de exclusão
+   * @param {Array} tasks - Array de tarefas
+   * @returns {Array} - Array filtrado sem tarefas excluídas
+   */
+  static filterExcludedTasks(tasks) {
+    if (!Array.isArray(tasks)) return tasks || [];
+    
+    const filtered = tasks.filter(task => !this.shouldExcludeTask(task));
+    const excludedCount = tasks.length - filtered.length;
+    
+    if (excludedCount > 0) {
+      console.log(`🚫 [FILTRO] ${excludedCount} tarefa(s) excluída(s) por tags de exclusão`);
+    }
+    
+    return filtered;
+  }
+
+  /**
+   * Obtém originalOrders filtrados (sem tarefas excluídas por tags)
+   * Use este método sempre que precisar acessar originalOrders para garantir que tarefas excluídas não sejam incluídas
+   * @param {Object} data - Objeto de dados com originalOrders
+   * @returns {Array} - Array de tarefas filtradas
+   */
+  static getFilteredOriginalOrders(data) {
+    if (!data || !Array.isArray(data.originalOrders)) return [];
+    return this.filterExcludedTasks(data.originalOrders);
+  }
+
   // 🆕 Conta quantos meses realmente têm dados (>0) em pelo menos um cliente
   static monthsWithData(rows = []) {
     if (!rows || rows.length === 0) return 0;
@@ -51,6 +134,16 @@ export class DataProcessingService {
 
     // Criar cópia profunda
     let filteredData = JSON.parse(JSON.stringify(data));
+
+    // 0) PRIMEIRO: Filtrar tarefas com tags de exclusão (ex: "Documentos Internos")
+    if (Array.isArray(filteredData.originalOrders)) {
+      const beforeCount = filteredData.originalOrders.length;
+      filteredData.originalOrders = this.filterExcludedTasks(filteredData.originalOrders);
+      const afterCount = filteredData.originalOrders.length;
+      if (beforeCount !== afterCount) {
+        console.log(`🚫 [FILTRO EXCLUSÃO] ${beforeCount - afterCount} tarefa(s) excluída(s) por tags de exclusão`);
+      }
+    }
 
     // 1) Tipo de demanda original
     if (filters?.tipoDemandaOriginal && filters.tipoDemandaOriginal !== 'todos') {
@@ -116,16 +209,27 @@ export class DataProcessingService {
     }));
 
     // ✅ RETORNAR APENAS DADOS DO NOTION
-    const consolidated = normalizedNotion;
+    let consolidated = normalizedNotion;
+    
+    // 🚫 Aplicar filtro de exclusão por tags (ex: "Documentos Internos")
+    const beforeExclusion = consolidated.length;
+    consolidated = this.filterExcludedTasks(consolidated);
+    const afterExclusion = consolidated.length;
+    
+    if (beforeExclusion !== afterExclusion) {
+      console.log(`🚫 [CONSOLIDATION] ${beforeExclusion - afterExclusion} tarefa(s) excluída(s) por tags de exclusão`);
+    }
     
     console.log('✅ [CONSOLIDATION] Concluída - NOTION ONLY:', {
       notion: normalizedNotion.length,
       sheets: 0,
-      total: consolidated.length
+      total: consolidated.length,
+      excluidas: beforeExclusion - afterExclusion
     });
     
-    // ✅ Verificar se todos os 1616 registros estão sendo processados
-    if (consolidated.length !== notionData?.length) {
+    // ✅ Verificar se todos os registros estão sendo processados (considerando exclusões)
+    const expectedAfterExclusion = notionData?.length || 0;
+    if (consolidated.length !== expectedAfterExclusion && afterExclusion === beforeExclusion) {
       console.warn('⚠️ [CONSOLIDATION] Possível perda de dados:', {
         esperado: notionData?.length,
         processado: consolidated.length,
@@ -150,7 +254,8 @@ export class DataProcessingService {
     try {
       const clientesSet = new Set();
       const clientesDetalhados = new Map();
-      const orders = data.originalOrders || [];
+      // ✅ Usar dados filtrados (sem tarefas excluídas por tags)
+      const orders = this.getFilteredOriginalOrders(data);
       let ordersComCliente = 0;
       let ordersSemCliente = 0;
 
@@ -481,8 +586,8 @@ export class DataProcessingService {
       let melhorMes = 'N/A';
       let maxAvg2025 = -1;
 
-      // CÁLCULO SIMPLES E DIRETO - Média de demandas 2025
-      const dadosOriginais = data.originalOrders || [];
+      // CÁLCULO SIMPLES E DIRETO - Média de demandas 2025 (filtrado por tags de exclusão)
+      const dadosOriginais = this.getFilteredOriginalOrders(data);
       const mesesAtuais = actualCurrentMonthIndex + 1; // 10 em outubro
 
       console.log('🔍 [REVISÃO COMPLETA] Dados disponíveis:', {
@@ -817,8 +922,8 @@ export class DataProcessingService {
     const actualCurrentMonthIndex = new Date().getMonth();
     const actualCurrentYear = new Date().getFullYear();
 
-    // ✅ USAR ORIGINAL ORDERS PARA COMPARAÇÃO MÊS A MÊS REAL
-    const originalOrders = data.originalOrders || [];
+    // ✅ USAR ORIGINAL ORDERS FILTRADOS (sem tarefas excluídas por tags)
+    const originalOrders = this.getFilteredOriginalOrders(data);
     
     console.log('📊 [TREND] Processando comparação mês a mês real:', {
       totalOrders: originalOrders.length,
@@ -1047,11 +1152,13 @@ export class DataProcessingService {
   // ==========================================
   static extractUniqueContentTypes(data) {
     console.log('🏷️ [TIPOS] Extraindo tipos únicos de demanda (normalizado)...');
-    if (!data || !Array.isArray(data.originalOrders)) return [];
+    // ✅ Usar dados filtrados (sem tarefas excluídas por tags)
+    const filteredOrders = this.getFilteredOriginalOrders(data);
+    if (!filteredOrders || filteredOrders.length === 0) return [];
 
     try {
       const tiposMap = new Map();
-      (data.originalOrders || []).forEach((order, index) => {
+      filteredOrders.forEach((order, index) => {
         const tipoOriginal = order.tipoDemanda;
         if (!tipoOriginal || !tipoOriginal.trim()) return;
 
@@ -1163,10 +1270,14 @@ export class DataProcessingService {
   // ==========================================
   static applyOriginalTypeFilter(data, tipoFiltro) {
     console.log('🔍 [TIPO ORIGINAL] Aplicando filtro:', tipoFiltro);
-    if (!data || !data.originalOrders || tipoFiltro === 'todos' || !tipoFiltro) return data;
+    // ✅ Usar dados já filtrados por tags de exclusão
+    const baseOrders = this.getFilteredOriginalOrders(data);
+    if (!baseOrders || baseOrders.length === 0 || tipoFiltro === 'todos' || !tipoFiltro) {
+      return { ...data, originalOrders: baseOrders };
+    }
 
     try {
-      const filteredOrders = data.originalOrders.filter(order =>
+      const filteredOrders = baseOrders.filter(order =>
         order.tipoDemanda && order.tipoDemanda.trim() === tipoFiltro
       );
 
@@ -1417,7 +1528,8 @@ export class DataProcessingService {
   static processRankingData(data, filters = {}) {
     const currentData = data.visaoGeral || [];
     const dados2024Ranking = data.visaoGeral2024 || [];
-    const originalOrders = data.originalOrders || [];
+    // ✅ Usar dados filtrados (sem tarefas excluídas por tags)
+    const originalOrders = this.getFilteredOriginalOrders(data);
     const periodo = filters.periodo || 'ambos';
     const onlyGroup = !!filters.onlyGroup;
     const excludeGroup = !!filters.excludeGroup;
@@ -1690,14 +1802,16 @@ export class DataProcessingService {
 
   static processDistributionData(data, filters) {
     // 🆕 NOVO: Processar tipos de demanda únicos da planilha + Notion
-    if (!data || !data.originalOrders) return [];
+    // ✅ Usar dados filtrados (sem tarefas excluídas por tags)
+    const filteredOrders = this.getFilteredOriginalOrders(data);
+    if (!filteredOrders || filteredOrders.length === 0) return [];
     
     console.log('📋 [DISTRIBUIÇÃO] Processando tipos de demanda únicos...');
     
     // Contar ocorrências de cada tipo de demanda
     const tiposMap = new Map();
     
-    data.originalOrders.forEach(order => {
+    filteredOrders.forEach(order => {
       const tipoDemanda = order.tipoDemanda;
       if (!tipoDemanda || !tipoDemanda.trim()) return;
       

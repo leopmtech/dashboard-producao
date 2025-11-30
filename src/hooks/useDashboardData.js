@@ -479,13 +479,32 @@ const useDashboardData = () => {
       console.log('📊 [NOTION ONLY] Carregando dados apenas do Notion...');
 
       // ✅ USAR APENAS NOTION
+      console.log('🔍 [DEBUG] Fazendo requisição para Notion API...');
       const notionResponse = await fetch('/.netlify/functions/notion?route=orders');
       
+      console.log('🔍 [DEBUG] Status da resposta:', notionResponse.status);
+      console.log('🔍 [DEBUG] Content-Type:', notionResponse.headers.get('content-type'));
+      
       if (!notionResponse.ok) {
-        throw new Error(`Erro na API Notion: ${notionResponse.status}`);
+        // Tentar ler o corpo da resposta para ver o erro
+        const errorText = await notionResponse.text();
+        console.error('❌ [DEBUG] Resposta de erro do servidor:', errorText.substring(0, 500));
+        throw new Error(`Erro na API Notion: ${notionResponse.status} - ${errorText.substring(0, 200)}`);
+      }
+      
+      // Verificar se a resposta é realmente JSON
+      const contentType = notionResponse.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const responseText = await notionResponse.text();
+        console.error('❌ [DEBUG] Resposta não é JSON:', responseText.substring(0, 500));
+        throw new Error(`Resposta não é JSON. Content-Type: ${contentType}`);
       }
       
       const notionData = await notionResponse.json();
+      console.log('✅ [DEBUG] Dados do Notion recebidos:', {
+        hasOriginalOrders: !!notionData?.originalOrders,
+        ordersCount: notionData?.originalOrders?.length || 0
+      });
       
       // 🆕 SET DEBUG STATE
       setNotionData(notionData);
@@ -576,6 +595,16 @@ const useDashboardData = () => {
         _originalIndex: index
       }));
 
+      // 🚫 APLICAR FILTRO DE EXCLUSÃO POR TAGS (ex: "Documentos Internos")
+      // Garantir que tarefas com tags de exclusão sejam removidas antes de processar métricas
+      const originalOrdersFiltered = DataProcessingService.filterExcludedTasks
+        ? DataProcessingService.filterExcludedTasks(originalOrdersMarked)
+        : originalOrdersMarked;
+      
+      if (originalOrdersFiltered.length !== originalOrdersMarked.length) {
+        console.log(`🚫 [HOOK] ${originalOrdersMarked.length - originalOrdersFiltered.length} tarefa(s) excluída(s) por tags de exclusão no merge`);
+      }
+
       // Mesclar visaoGeral por cliente somando campos
       const visaoGeralMerged = mergeClientsArrays(
         notionData?.visaoGeral || [],
@@ -613,8 +642,8 @@ const useDashboardData = () => {
         loadedAt: new Date().toISOString(),
         sheetName: 'notion+sheets',
         
-        // 🆕 DADOS PRINCIPAIS COM MARCAÇÃO DE FONTE
-        originalOrders: originalOrdersMarked,
+        // 🆕 DADOS PRINCIPAIS COM MARCAÇÃO DE FONTE (já filtrados por tags de exclusão)
+        originalOrders: originalOrdersFiltered,
         _consolidatedSource: consolidatedRawData, // Para o indicador no App.js
         
         metrics: notionData?.metrics || sheetsData?.metrics || {},
@@ -663,7 +692,18 @@ const useDashboardData = () => {
       setError(null);
 
     } catch (err) {
-      console.error('❌ Erro ao carregar fontes:', err);
+      console.error('❌ [ERRO CRÍTICO] Erro ao carregar fontes:', {
+        message: err.message,
+        stack: err.stack,
+        name: err.name,
+        cause: err.cause
+      });
+      
+      // Log detalhado para debug
+      if (err.message && err.message.includes('JSON')) {
+        console.error('❌ [ERRO JSON] Possível problema de parsing JSON. Verifique se o servidor está retornando JSON válido.');
+      }
+      
       setError(err.message || 'Falha ao carregar dados');
       setData(null);
       setRawData(null);

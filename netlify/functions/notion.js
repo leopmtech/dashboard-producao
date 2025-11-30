@@ -27,7 +27,7 @@ function buildNotionClient() {
   }
   let client = null;
   try {
-    client = new Client({ auth: token });
+    client = new Client({ auth: token, notionVersion: '2025-09-03' });
   } catch (_) {}
   return { client, token, databaseId: dbId };
 }
@@ -45,7 +45,7 @@ async function fetchAllFromDatabase({ client, token }, databaseId) {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Notion-Version': '2022-06-28',
+          'Notion-Version': '2025-09-03',
           'Content-Type': 'application/json'
         },
         body
@@ -100,7 +100,7 @@ async function fetchNotionData({ client, token }, databaseId) {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Notion-Version': '2022-06-28',
+          'Notion-Version': '2025-09-03',
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ ...body, sorts: [{ property: 'Data de entrega', direction: 'descending' }] })
@@ -110,7 +110,7 @@ async function fetchNotionData({ client, token }, databaseId) {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
-            'Notion-Version': '2022-06-28',
+            'Notion-Version': '2025-09-03',
             'Content-Type': 'application/json'
           },
           body: JSON.stringify(body)
@@ -152,7 +152,7 @@ exports.handler = async (event, context) => {
               method: 'POST',
               headers: {
                 'Authorization': `Bearer ${notionCtx.token}`,
-                'Notion-Version': '2022-06-28',
+                'Notion-Version': '2025-09-03',
                 'Content-Type': 'application/json'
               },
               body: JSON.stringify({ query: params.dbName, filter: { property: 'object', value: 'database' } })

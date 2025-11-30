@@ -12,6 +12,7 @@ const PROP = {
   status: 'Status',
   complexidade: 'Complexidade',
   prioridade: 'Prioridade',
+  tags: 'Tags', // Campo de tags (multi_select)
 };
 
 const getText = (p) => {
@@ -29,6 +30,19 @@ const getSelectName = (p) => {
   if (p.type === 'status') return p.status?.name || '';
   if (p.type === 'multi_select') return (p.multi_select || []).map(x => x.name).join(', ');
   return '';
+};
+
+// Função para extrair tags como array (para facilitar verificação)
+const getTagsArray = (p) => {
+  if (!p) return [];
+  if (p.type === 'multi_select') {
+    return (p.multi_select || []).map(x => x.name).filter(Boolean);
+  }
+  // Se for string separada por vírgula (fallback)
+  if (typeof p === 'string' && p.trim()) {
+    return p.split(',').map(t => t.trim()).filter(Boolean);
+  }
+  return [];
 };
 
 const getPeople = (p) => {
@@ -59,6 +73,30 @@ function rowToOrder(page) {
     const status = getSelectName(props[PROP.status]) || getText(props[PROP.status]);
     const complexidade = getSelectName(props[PROP.complexidade]) || getText(props[PROP.complexidade]);
     const prioridade = getSelectName(props[PROP.prioridade]) || getText(props[PROP.prioridade]);
+    
+    // Extrair tags como array (com verificação de segurança)
+    // Se o campo Tags não existir no Notion, retorna array vazio
+    // Isso é seguro e não deve causar erros mesmo se o campo não existir
+    let tagsArray = [];
+    let tagsString = '';
+    
+    try {
+      // Tentar acessar a propriedade Tags de forma segura
+      // Se não existir, props[PROP.tags] será undefined e getTagsArray retornará []
+      const tagsProperty = props[PROP.tags];
+      if (tagsProperty !== undefined && tagsProperty !== null) {
+        tagsArray = getTagsArray(tagsProperty);
+        tagsString = tagsArray.join(', ');
+      }
+      // Se tagsProperty for undefined/null, tagsArray já está como [] (padrão)
+    } catch (tagsError) {
+      // Se houver erro ao processar tags, apenas logar e continuar
+      // Não quebrar o processamento por causa de tags
+      // Isso pode acontecer se o campo Tags existir mas tiver formato inesperado
+      console.warn('⚠️ [NOTION ADAPTER] Erro ao processar tags para página:', page?.id, tagsError.message);
+      tagsArray = [];
+      tagsString = '';
+    }
 
     let isDone = getCheckbox(props[PROP.concluido]);
     const statusLower = (status || '').toLowerCase();
@@ -81,6 +119,8 @@ function rowToOrder(page) {
       status,
       complexidade,
       prioridade,
+      tags: tagsArray, // Array de tags
+      tagsString: tagsString, // String de tags (para compatibilidade)
       isConcluido: isDone,
       isRelatorio: (tipoDemanda || '').toLowerCase().includes('relat'),
       dataEntregaDate,
@@ -117,6 +157,8 @@ function rowToOrder(page) {
       isRelatorio: false,
       dataEntregaDate: null,
       dataInicioDate: null,
+      tags: [],
+      tagsString: '',
       _error: error.message
     };
   }

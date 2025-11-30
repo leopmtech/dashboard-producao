@@ -135,7 +135,38 @@ router.get('/orders', async (req, res) => {
 
     console.log(`✅ [NOTION API] Total carregado: ${fetchResult.results.length} registros`);
 
-    const orders = fetchResult.results.map(rowToOrder);
+    // Processar orders com tratamento de erro individual
+    const orders = [];
+    const errors = [];
+    
+    fetchResult.results.forEach((page, index) => {
+      try {
+        const order = rowToOrder(page);
+        if (order && order.id) {
+          orders.push(order);
+        }
+      } catch (error) {
+        console.error(`❌ [NOTION API] Erro ao processar página ${index}:`, {
+          pageId: page?.id,
+          error: error.message,
+          stack: error.stack
+        });
+        errors.push({
+          index,
+          pageId: page?.id,
+          error: error.message
+        });
+        // Continuar processando outras páginas mesmo se uma falhar
+      }
+    });
+
+    if (errors.length > 0) {
+      console.warn(`⚠️ [NOTION API] ${errors.length} página(s) falharam ao processar, mas continuando...`);
+    }
+
+    if (orders.length === 0) {
+      console.warn('⚠️ [NOTION API] Nenhuma ordem foi processada com sucesso!');
+    }
 
     const summary = summarize(orders);
     const clientsData = groupByClient(orders);
@@ -164,7 +195,18 @@ router.get('/orders', async (req, res) => {
     };
     
     console.log(`✅ [API] ${orders.length} registros carregados do Notion`);
-    res.json(dashboardData);
+    
+    // Garantir que sempre retornamos JSON válido
+    try {
+      res.json(dashboardData);
+    } catch (jsonError) {
+      console.error('❌ [API] Erro ao serializar JSON:', jsonError);
+      res.status(500).json({
+        success: false,
+        error: 'Erro ao serializar resposta JSON',
+        details: process.env.NODE_ENV === 'development' ? jsonError.message : undefined
+      });
+    }
     
   } catch (error) {
     console.error('❌ [API] Erro ao carregar dados do Notion:', error);
