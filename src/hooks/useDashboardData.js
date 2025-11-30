@@ -6,9 +6,277 @@ import { useState, useEffect, useCallback } from 'react';
 import notionService from '../services/notionService';
 import dataSourceService from '../services/dataSourceService';
 import { DataProcessingService } from '../services/dataProcessingService';
+import { MOCK_NOTION_DATA, shouldUseMockData, useProductionData, simulateNetworkDelay } from '../services/mockData';
 
 // --- Helpers de merge --- //
 const sumSafe = (a = 0, b = 0) => (Number(a) || 0) + (Number(b) || 0);
+
+// ✅ Função para obter base URL da API com fallback inteligente
+const getApiBase = () => {
+  if (process.env.NODE_ENV === 'development') {
+    // Se já estamos na porta 8888 (Netlify dev), usar URL relativa
+    if (window.location.port === '8888' || window.location.hostname === 'localhost' && window.location.port === '') {
+      return '';
+    }
+    // Caso contrário, tentar localhost:8888 primeiro
+    return 'http://localhost:8888';
+  }
+  // Produção: usar URL relativa
+  return '';
+};
+
+// ✅ Função para lidar com interferência de extensões do Chrome
+// Bypass Chrome extension interference
+const fetchWithFallback = async (url, options = {}) => {
+  try {
+    // Try with original fetch
+    return await fetch(url, options);
+  } catch (error) {
+    // Check if error is related to Chrome extensions
+    if (error.message && (
+      error.message.includes('chrome-extension') || 
+      error.message.includes('Failed to fetch') ||
+      error.name === 'TypeError'
+    )) {
+      console.warn('⚠️ [FETCH] Erro detectado (possível interferência de extensão Chrome), tentando fallback com XMLHttpRequest...');
+      
+      // Use XMLHttpRequest as fallback
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        const method = options.method || 'GET';
+        
+        xhr.open(method, url);
+        
+        // Set headers if provided
+        if (options.headers) {
+          Object.keys(options.headers).forEach(key => {
+            xhr.setRequestHeader(key, options.headers[key]);
+          });
+        }
+        
+        xhr.onload = () => {
+          // Create a response-like object
+          const response = {
+            ok: xhr.status >= 200 && xhr.status < 300,
+            status: xhr.status,
+            statusText: xhr.statusText,
+            url: xhr.responseURL,
+            headers: {
+              get: (name) => {
+                const header = xhr.getResponseHeader(name);
+                return header;
+              },
+              entries: () => {
+                const headers = {};
+                const headerStr = xhr.getAllResponseHeaders();
+                if (headerStr) {
+                  headerStr.trim().split('\r\n').forEach(line => {
+                    const parts = line.split(': ');
+                    if (parts.length === 2) {
+                      headers[parts[0].toLowerCase()] = parts[1];
+                    }
+                  });
+                }
+                return Object.entries(headers);
+              }
+            },
+            text: () => Promise.resolve(xhr.responseText),
+            json: () => {
+              try {
+                return Promise.resolve(JSON.parse(xhr.responseText));
+              } catch (e) {
+                return Promise.reject(new Error('Invalid JSON response'));
+              }
+            }
+          };
+          resolve(response);
+        };
+        
+        xhr.onerror = () => {
+          reject(new Error('Network error'));
+        };
+        
+        xhr.ontimeout = () => {
+          reject(new Error('Request timeout'));
+        };
+        
+        // Set timeout if provided
+        if (options.timeout) {
+          xhr.timeout = options.timeout;
+        }
+        
+        // Send request with body if provided
+        if (options.body) {
+          xhr.send(options.body);
+        } else {
+          xhr.send();
+        }
+      });
+    }
+    // Re-throw if not a Chrome extension error
+    throw error;
+  }
+};
+
+// ✅ Função para carregar dados de produção do site real do Netlify
+const loadProductionData = async () => {
+  // URL base: usar site real em desenvolvimento forçado, ou URL relativa em produção real
+  const baseUrl = process.env.NODE_ENV === 'production' 
+    ? '' 
+    : 'https://dash-producao.netlify.app';
+  
+  const url = `${baseUrl}/.netlify/functions/notion?route=orders`;
+  console.log('🌐 [PRODUCTION] Loading from:', url);
+  
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    console.log('🔍 [PRODUCTION] Response status:', response.status);
+    console.log('🔍 [PRODUCTION] Response headers:', [...response.headers.entries()]);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const contentType = response.headers.get('content-type');
+    if (contentType?.includes('text/html')) {
+      throw new Error('Received HTML instead of JSON - Netlify function not found or not deployed');
+    }
+    
+    const data = await response.json();
+    console.log('✅ [PRODUCTION] Real data loaded:', data.originalOrders?.length || 0, 'records');
+    console.log('✅ [PRODUCTION] Data preview:', {
+      hasOriginalOrders: !!data.originalOrders,
+      ordersCount: data.originalOrders?.length || 0,
+      hasMetrics: !!data.metrics,
+      hasVisaoGeral: !!data.visaoGeral
+    });
+    
+    return data;
+    
+  } catch (error) {
+    console.error('❌ [PRODUCTION] Failed to load from deployed site:', error.message);
+    console.log('🔄 [PRODUCTION] Falling back to mock data due to error');
+    
+    // Return mock data as fallback
+    return MOCK_NOTION_DATA;
+  }
+};
+
+// ✅ Função para verificar se deve usar produção
+const shouldUseProduction = () => {
+  const forceProduction = localStorage.getItem('force-production') === 'true' ||
+                         window.location.search.includes('force-production=true');
+  
+  const isProduction = process.env.NODE_ENV === 'production';
+  
+  // Se estiver no site real do Netlify, sempre usar produção
+  const isOnNetlifySite = window.location.hostname.includes('netlify.app');
+  
+  const finalDecision = isProduction || forceProduction || isOnNetlifySite;
+  
+  console.log('🔍 [MODE CHECK]', {
+    forceProduction,
+    isProduction,
+    isOnNetlifySite,
+    hostname: window.location.hostname,
+    finalDecision
+  });
+  
+  return finalDecision;
+};
+
+// ✅ Função para fazer requisição com retry e fallback para produção
+const fetchWithRetryAndFallback = async (route = 'orders', maxRetries = 1) => {
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  const productionUrl = 'https://dash-producao.netlify.app';
+  const forceProduction = shouldUseProduction();
+  
+  // URLs para tentar (em ordem de prioridade)
+  const urlsToTry = [];
+  
+  if (forceProduction && isDevelopment) {
+    // Modo produção forçado em desenvolvimento: usar site real primeiro
+    urlsToTry.push(`${productionUrl}/.netlify/functions/notion?route=${route}`);
+    urlsToTry.push(`/.netlify/functions/notion?route=${route}`);
+  } else if (isDevelopment) {
+    // 1. Tentar localhost:8888 (Netlify dev)
+    urlsToTry.push(`http://localhost:8888/.netlify/functions/notion?route=${route}`);
+    // 2. Tentar URL relativa (se já estiver na porta 8888)
+    urlsToTry.push(`/.netlify/functions/notion?route=${route}`);
+    // 3. Tentar site real como fallback
+    urlsToTry.push(`${productionUrl}/.netlify/functions/notion?route=${route}`);
+  } else {
+    // Produção: usar URL relativa primeiro, depois site real
+    urlsToTry.push(`/.netlify/functions/notion?route=${route}`);
+    urlsToTry.push(`${productionUrl}/.netlify/functions/notion?route=${route}`);
+  }
+  
+  let lastError = null;
+  
+  for (let i = 0; i < urlsToTry.length; i++) {
+    const url = urlsToTry[i];
+    const isLastAttempt = i === urlsToTry.length - 1;
+    
+    try {
+      console.log(`🔍 [FETCH] Tentativa ${i + 1}/${urlsToTry.length}: ${url}`);
+      
+      const response = await fetchWithFallback(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      // Se a resposta foi recebida (mesmo que com erro HTTP), considerar sucesso na conexão
+      if (response.status === 200) {
+        console.log(`✅ [FETCH] Sucesso na tentativa ${i + 1} com URL: ${url}`);
+        return response;
+      }
+      
+      // Se não for 200 mas não for erro de conexão, ainda é uma resposta válida
+      if (response.status >= 400 && response.status < 500) {
+        console.warn(`⚠️ [FETCH] Resposta HTTP ${response.status} de ${url}`);
+        return response; // Retornar mesmo assim para tratamento de erro adequado
+      }
+      
+    } catch (error) {
+      lastError = error;
+      const isConnectionError = 
+        error.message.includes('Failed to fetch') ||
+        error.message.includes('ERR_CONNECTION_REFUSED') ||
+        error.message.includes('Network error') ||
+        error.name === 'TypeError';
+      
+      if (isConnectionError) {
+        console.warn(`⚠️ [FETCH] Erro de conexão na tentativa ${i + 1}: ${error.message}`);
+        
+        if (!isLastAttempt) {
+          console.log(`🔄 [FETCH] Tentando próxima URL...`);
+          continue;
+        }
+      }
+      
+      // Se não for erro de conexão ou é a última tentativa, propagar erro
+      if (!isLastAttempt && !isConnectionError) {
+        throw error;
+      }
+    }
+  }
+  
+  // Se chegou aqui, todas as tentativas falharam
+  const errorMessage = isDevelopment
+    ? `Não foi possível conectar à API. Verifique se o Netlify Dev está rodando (npm start). Erro: ${lastError?.message || 'Unknown error'}`
+    : `Erro ao conectar com a API: ${lastError?.message || 'Unknown error'}`;
+  
+  throw new Error(errorMessage);
+};
 
 // ✅ NOVA FUNÇÃO: Prepara dados de tendência com todos os 12 meses
 const prepareTrendData = (rawData, currentYear = new Date().getFullYear()) => {
@@ -478,33 +746,128 @@ const useDashboardData = () => {
     try {
       console.log('📊 [NOTION ONLY] Carregando dados apenas do Notion...');
 
-      // ✅ USAR APENAS NOTION
-      console.log('🔍 [DEBUG] Fazendo requisição para Notion API...');
-      const notionResponse = await fetch('/.netlify/functions/notion?route=orders');
+      // ✅ DETECÇÃO DE MODO DE DESENVOLVIMENTO COM MOCK DATA
+      const isProductionMode = shouldUseProduction();
+      const isDevelopmentMode = shouldUseMockData();
+      let notionData;
       
-      console.log('🔍 [DEBUG] Status da resposta:', notionResponse.status);
-      console.log('🔍 [DEBUG] Content-Type:', notionResponse.headers.get('content-type'));
-      
-      if (!notionResponse.ok) {
-        // Tentar ler o corpo da resposta para ver o erro
-        const errorText = await notionResponse.text();
-        console.error('❌ [DEBUG] Resposta de erro do servidor:', errorText.substring(0, 500));
-        throw new Error(`Erro na API Notion: ${notionResponse.status} - ${errorText.substring(0, 200)}`);
-      }
-      
-      // Verificar se a resposta é realmente JSON
-      const contentType = notionResponse.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        const responseText = await notionResponse.text();
-        console.error('❌ [DEBUG] Resposta não é JSON:', responseText.substring(0, 500));
-        throw new Error(`Resposta não é JSON. Content-Type: ${contentType}`);
-      }
-      
-      const notionData = await notionResponse.json();
-      console.log('✅ [DEBUG] Dados do Notion recebidos:', {
-        hasOriginalOrders: !!notionData?.originalOrders,
-        ordersCount: notionData?.originalOrders?.length || 0
+      // Log da fonte de dados
+      console.log('📊 [DATA SOURCE]', {
+        mode: isProductionMode ? 'PRODUCTION' : 'DEVELOPMENT',
+        usingMock: isDevelopmentMode,
+        hostname: window.location.hostname,
+        port: window.location.port,
+        environment: process.env.NODE_ENV,
+        searchParams: window.location.search
       });
+      
+      if (isDevelopmentMode) {
+        console.log('🔧 [DEV MODE] Usando dados mock - Netlify Dev não está disponível');
+        console.log('🔧 [DEV MODE] Para usar funções reais, execute: npm start (netlify dev)');
+        console.log('🔧 [DEV MODE] Ou use o toggle no painel de debug para testar produção');
+        console.log('🔧 [DEV MODE] Ambiente detectado:', {
+          nodeEnv: process.env.NODE_ENV,
+          port: window.location.port,
+          hostname: window.location.hostname,
+          href: window.location.href
+        });
+        
+        // Simular delay de rede
+        await simulateNetworkDelay(800);
+        
+        // Usar dados mock
+        notionData = MOCK_NOTION_DATA;
+        console.log('✅ [DEV MODE] Dados mock carregados:', {
+          hasOriginalOrders: !!notionData?.originalOrders,
+          ordersCount: notionData?.originalOrders?.length || 0,
+          expectedCount: 1616,
+          note: 'Mock data tem 50 registros para desenvolvimento. Em produção, espera-se 1616 registros reais.'
+        });
+        
+        // Continuar com o processamento normal usando dados mock
+        // (o código abaixo processa notionData normalmente)
+      } else {
+        // ✅ USAR APENAS NOTION (modo produção ou Netlify Dev)
+        console.log('🌐 [PRODUCTION MODE] Attempting to load real data...');
+        
+        // Se forçando produção em desenvolvimento, usar função específica
+        if (isProductionMode && process.env.NODE_ENV === 'development') {
+          console.log('🌐 [PRODUCTION] Using deployed Netlify site: https://dash-producao.netlify.app');
+          notionData = await loadProductionData();
+        } else {
+          // Usar função inteligente com retry e fallback
+          console.log('🔍 [DEBUG] Fazendo requisição para Notion API...');
+          console.log('🔍 [DEBUG] Environment:', process.env.NODE_ENV);
+          console.log('🔍 [DEBUG] Window location:', window.location.href);
+          
+          // Função fetchWithRetryAndFallback tenta múltiplas URLs automaticamente
+          const notionResponse = await fetchWithRetryAndFallback('orders');
+      
+          console.log('🔍 [DEBUG] Status da resposta:', notionResponse.status);
+          console.log('🔍 [DEBUG] Response URL:', notionResponse.url);
+          console.log('🔍 [DEBUG] Content-Type:', notionResponse.headers.get('content-type'));
+          console.log('🔍 [DEBUG] Response headers:', Object.fromEntries([...notionResponse.headers.entries()]));
+          
+          if (!notionResponse.ok) {
+            // Tentar ler o corpo da resposta para ver o erro
+            const errorText = await notionResponse.text();
+            console.error('❌ [DEBUG] Resposta de erro do servidor:', errorText.substring(0, 500));
+            console.error('❌ [DEBUG] Response URL:', notionResponse.url);
+            throw new Error(`Erro na API Notion: ${notionResponse.status} - ${errorText.substring(0, 200)}`);
+          }
+          
+          // Verificar se a resposta é realmente JSON
+          const contentType = notionResponse.headers.get('content-type');
+          if (!contentType || !contentType.includes('application/json')) {
+            const responseText = await notionResponse.text();
+            console.error('❌ [DEBUG] Resposta não é JSON:', responseText.substring(0, 500));
+            console.error('❌ [DEBUG] Response URL:', notionResponse.url);
+            console.error('❌ [DEBUG] Content-Type recebido:', contentType);
+            throw new Error(`Resposta não é JSON. Content-Type: ${contentType}. URL: ${notionResponse.url}`);
+          }
+          
+          notionData = await notionResponse.json();
+        }
+        console.log('✅ [PROD] Raw data received:', notionData);
+        console.log('✅ [PROD] Data type:', typeof notionData);
+        console.log('✅ [PROD] Data structure:', {
+          success: notionData.success,
+          hasOriginalOrders: !!notionData?.originalOrders,
+          ordersCount: notionData?.originalOrders?.length || 0,
+          expectedCount: 1616,
+          has_data_array: Array.isArray(notionData.data),
+          data_count: notionData.data?.length || 0,
+          has_metrics: !!notionData.metrics,
+          has_visaoGeral: !!notionData.visaoGeral,
+          visaoGeral_count: notionData.visaoGeral?.length || 0,
+          first_order: notionData?.originalOrders?.[0] || null,
+          debug_info: notionData.debug || null
+        });
+        
+        // Log de comparação
+        const actualCount = notionData?.originalOrders?.length || 0;
+        const expectedCount = 1616;
+        if (actualCount !== expectedCount) {
+          console.warn(`⚠️ [PROD] Record count mismatch: Expected ${expectedCount}, got ${actualCount}`);
+        } else {
+          console.log(`✅ [PROD] Record count matches expected: ${actualCount}`);
+        }
+        
+        // Se a resposta tem estrutura diferente (com wrapper success/data)
+        if (notionData.success === false) {
+          console.error('❌ [PROD] API returned error:', notionData);
+          throw new Error(notionData.error || 'API returned error');
+        }
+        
+        // Se a resposta tem wrapper { success, data }
+        if (notionData.success === true && notionData.data) {
+          console.log('🔍 [PROD] Response has wrapper structure, extracting data...');
+          // A estrutura esperada já está em notionData, mas vamos verificar
+          if (!notionData.originalOrders && notionData.data) {
+            console.warn('⚠️ [PROD] Data structure mismatch - data in wrapper but no originalOrders');
+          }
+        }
+      }
       
       // 🆕 SET DEBUG STATE
       setNotionData(notionData);

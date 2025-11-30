@@ -8,6 +8,21 @@
   CI = "false"
   GENERATE_SOURCEMAP = "false"
 
+[dev]
+  command = "npm run start:react"
+  port = 8888
+  targetPort = 3000
+  framework = "#auto"
+
+# CRITICAL: Redirect para funções Netlify DEVE vir ANTES do redirect genérico
+# Isso garante que requisições para /.netlify/functions/* não sejam interceptadas
+[[redirects]]
+  from = "/.netlify/functions/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+  force = true
+
+# Redirect genérico para SPA (deve vir DEPOIS do redirect de funções)
 [[redirects]]
   from = "/*"
   to = "/index.html"

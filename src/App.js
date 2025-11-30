@@ -3,7 +3,7 @@
 // Dashboard principal conectado automaticamente à nova planilha
 // ==========================================
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './styles/dashboard.css';
 
 // Componentes existentes (mantidos)
@@ -32,6 +32,95 @@ import AnalystsCalendar from './components/AnalystsCalendar';
 import { default as useDashboardData } from './hooks/useDashboardData';
 import { DataProcessingService, extractDynamicKPIMetrics } from './services/dataProcessingService'; // 👈 CORRIGIDO: named import
 import { dataStandardizer } from './utils/dataStandardization.js';
+import { useProductionData } from './services/mockData';
+
+// Componente de Debug para desenvolvimento
+const DebugPanel = ({ data }) => {
+  const [forceProduction, setForceProduction] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('force-production') === 'true';
+    }
+    return false;
+  });
+  const isProduction = useProductionData();
+  
+  const toggleMode = () => {
+    const newMode = !forceProduction;
+    setForceProduction(newMode);
+    
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('force-production', newMode.toString());
+      // Também atualizar query string para compatibilidade
+      const url = new URL(window.location);
+      if (newMode) {
+        url.searchParams.set('force-production', 'true');
+      } else {
+        url.searchParams.delete('force-production');
+      }
+      window.history.replaceState({}, '', url);
+      window.location.reload();
+    }
+  };
+  
+  if (process.env.NODE_ENV !== 'development') return null;
+  
+  const recordCount = data?.originalOrders?.length || 0;
+  const expectedCount = 1616;
+  const isMockData = recordCount === 50;
+  
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      right: 0,
+      background: isProduction ? '#4CAF50' : '#f44336',
+      color: 'white',
+      padding: '10px 15px',
+      zIndex: 9999,
+      fontSize: '12px',
+      borderRadius: '0 0 0 8px',
+      boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
+      fontFamily: 'monospace',
+      minWidth: '200px'
+    }}>
+      <div style={{ fontWeight: 'bold', marginBottom: '8px', fontSize: '13px' }}>
+        🔧 DEBUG PANEL
+      </div>
+      <button
+        onClick={toggleMode}
+        style={{
+          color: 'white',
+          background: 'rgba(255,255,255,0.2)',
+          border: '1px solid white',
+          padding: '6px 10px',
+          borderRadius: '4px',
+          cursor: 'pointer',
+          width: '100%',
+          marginBottom: '8px',
+          fontWeight: 'bold'
+        }}
+      >
+        {isProduction ? '🌐 PRODUCTION' : '🔧 MOCK DATA'}
+      </button>
+      <div style={{ marginTop: '5px', fontSize: '11px', lineHeight: '1.4' }}>
+        <div>Mode: {isProduction ? '🌐 PRODUCTION' : '🔧 DEVELOPMENT'}</div>
+        <div>Port: {window.location.port || 'default'}</div>
+        <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px solid rgba(255,255,255,0.3)' }}>
+          Records: <strong>{recordCount}</strong>
+          {isMockData && <span style={{ color: '#ffeb3b' }}> (Mock)</span>}
+          {!isMockData && recordCount !== expectedCount && (
+            <span style={{ color: '#ffeb3b' }}> / {expectedCount}</span>
+          )}
+        </div>
+        {isProduction && recordCount === 0 && (
+          <div style={{ color: '#ffeb3b', marginTop: '4px', fontSize: '10px' }}>
+            ⚠️ No data loaded
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 function App() {
   const [filters, setFilters] = useState({
@@ -963,6 +1052,9 @@ function App() {
   // ==========================================
   return (
     <div className="dashboard-producao modern">
+      {/* Debug Panel (apenas em desenvolvimento) */}
+      <DebugPanel data={data} />
+      
       {/* Header com navegação aprimorada */}
       <div className="dashboard-header modern">
         <div className="header-content">

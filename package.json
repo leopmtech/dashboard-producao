@@ -23,10 +23,13 @@
     "concurrently": "^9.2.1"
   },
   "scripts": {
-    "start": "BROWSER=none PORT=3000 react-scripts start",
+    "start": "netlify dev",
+    "start:react-only": "BROWSER=none PORT=3000 react-scripts start",
+    "start:react": "BROWSER=none PORT=3000 react-scripts start",
     "build": "react-scripts build",
     "server": "PORT=8000 node server/index.js",
-    "dev": "concurrently 'npm run start' 'npm run server'"
+    "dev": "netlify dev",
+    "dev:legacy": "concurrently 'npm run start:react' 'npm run server'"
   },
   "browserslist": {
     "production": [

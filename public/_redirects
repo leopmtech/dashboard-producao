@@ -1,0 +1,9 @@
+# Netlify _redirects file
+# CRITICAL: Funções Netlify devem vir ANTES do redirect genérico
+# O "!" força o redirect mesmo se o arquivo existe
+
+/.netlify/functions/* /.netlify/functions/:splat 200!
+
+# Redirect genérico para SPA React (deve vir DEPOIS)
+/* /index.html 200
+
