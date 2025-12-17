@@ -22,7 +22,7 @@ const EventTimeline = ({ data, onEventClick, title = "Timeline de Eventos" }) =>
     const currentYear = currentDate.getFullYear();
 
     // Função para processar dados de um ano específico
-    const processYearData = (yearData, year) => {
+    const processYearData = (yearData, year, clientName = null) => {
       if (!yearData) return;
 
       const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 
@@ -30,27 +30,44 @@ const EventTimeline = ({ data, onEventClick, title = "Timeline de Eventos" }) =>
       const monthKeys = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho',
                         'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
       
+      const getMonthTotal = (monthKey) => {
+        if (!clientName) {
+          // Geral: soma de todos os clientes
+          return yearData.reduce((sum, client) => sum + (Number(client?.[monthKey]) || 0), 0);
+        }
+        // Cliente selecionado: soma apenas das linhas que batem o nome (pode haver duplicatas)
+        return yearData
+          .filter((c) => String(c?.cliente || '').trim() === String(clientName).trim())
+          .reduce((sum, client) => sum + (Number(client?.[monthKey]) || 0), 0);
+      };
+
       // Compilar total de demandas por mês
       monthKeys.forEach((monthKey, monthIndex) => {
         // Para 2025, só mostrar dados até o mês atual
         if (year === 2025 && monthIndex > currentMonth) return;
         
-        const totalMonth = yearData.reduce((sum, client) => {
-          return sum + (Number(client[monthKey]) || 0);
-        }, 0);
+        const totalMonth = getMonthTotal(monthKey);
         
         if (totalMonth > 0) {
           events.push({
-            id: `total-${year}-${monthIndex}`,
+            id: `total-${clientName || 'geral'}-${year}-${monthIndex}`,
             date: new Date(year, monthIndex, 15), // 15º dia do mês
             month: monthNames[monthIndex],
             year: year,
             value: totalMonth,
-            type: totalMonth >= 10 ? 'high' : totalMonth >= 5 ? 'medium' : 'low',
-            title: `📊 ${monthNames[monthIndex]} ${year}`,
-            description: `Total de ${totalMonth} relatório${totalMonth > 1 ? 's' : ''} produzido${totalMonth > 1 ? 's' : ''}`,
+            // ✅ Alinhar thresholds com o filtro da UI:
+            // - high: 5+
+            // - medium: 2-4
+            // - low: 1
+            type: totalMonth >= 5 ? 'high' : totalMonth >= 2 ? 'medium' : 'low',
+            title: clientName
+              ? `📊 ${clientName} • ${monthNames[monthIndex]} ${year}`
+              : `📊 ${monthNames[monthIndex]} ${year}`,
+            description: clientName
+              ? `${clientName}: ${totalMonth} relatório${totalMonth > 1 ? 's' : ''} no mês`
+              : `Total de ${totalMonth} relatório${totalMonth > 1 ? 's' : ''} produzido${totalMonth > 1 ? 's' : ''}`,
             isCompiled: true,
-            client: 'Geral'
+            client: clientName || 'Geral'
           });
         }
       });
@@ -59,12 +76,12 @@ const EventTimeline = ({ data, onEventClick, title = "Timeline de Eventos" }) =>
 
     // Processar dados de 2024
     if (selectedPeriod === 'all' || selectedPeriod === '2024') {
-      processYearData(data.visaoGeral2024, 2024);
+      processYearData(data.visaoGeral2024, 2024, selectedClient);
     }
 
     // Processar dados de 2025
     if (selectedPeriod === 'all' || selectedPeriod === '2025') {
-      processYearData(data.visaoGeral, 2025);
+      processYearData(data.visaoGeral, 2025, selectedClient);
     }
     
     // Compilar eventos e marcos importantes
@@ -89,19 +106,20 @@ const EventTimeline = ({ data, onEventClick, title = "Timeline de Eventos" }) =>
     // Filtrar por tipo de evento
     let filteredEvents = events;
     if (selectedEventType !== 'all') {
-      filteredEvents = events.filter(event => event.type === selectedEventType);
+      filteredEvents = filteredEvents.filter(event => event.type === selectedEventType);
     }
 
-    // Filtrar por cliente selecionado
-    if (selectedClient) {
-      filteredEvents = filteredEvents.filter(event => event.client === selectedClient);
-    }
+    // Filtrar por cliente selecionado (marcos ainda podem estar fora)
+    if (selectedClient) filteredEvents = filteredEvents.filter(event => event.client === selectedClient);
 
     // Filtrar por termo de busca
     if (searchTerm) {
+      const q = searchTerm.toLowerCase();
       filteredEvents = filteredEvents.filter(event => 
-        event.client.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        event.month.toLowerCase().includes(searchTerm.toLowerCase())
+        String(event.client || '').toLowerCase().includes(q) ||
+        String(event.month || '').toLowerCase().includes(q) ||
+        String(event.title || '').toLowerCase().includes(q) ||
+        String(event.description || '').toLowerCase().includes(q)
       );
     }
 

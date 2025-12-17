@@ -1023,7 +1023,7 @@ function App() {
       {/* Loading Overlay */}
       {loading && (
         <div className="loading-overlay">
-          <div className="loading-spinner">🔄 <span>Carregando dados consolidados (Sheets + Notion)...</span></div>
+          <div className="loading-spinner">🔄 <span>Carregando dados do Notion...</span></div>
         </div>
       )}
 
