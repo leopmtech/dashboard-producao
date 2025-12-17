@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { DataProcessingService } from '../services/dataProcessingService';
 import { Filter } from 'lucide-react';
 
@@ -38,6 +38,12 @@ const YearComparisonCard = ({ data, title = '📊 Comparativo por Ano' }) => {
   }, [orders]);
 
   const [selectedYears, setSelectedYears] = useState([]);
+
+  // ✅ Evita crash em transições de filtro: limita seleção aos anos realmente disponíveis
+  const selectedYearsEffective = useMemo(() => {
+    const available = new Set((yearsAvailable || []).map(String));
+    return (selectedYears || []).map(String).filter((y) => available.has(y));
+  }, [selectedYears, yearsAvailable]);
 
   // Inicializa seleção: últimos 2 anos disponíveis (ou 1)
   useEffect(() => {
@@ -104,8 +110,22 @@ const YearComparisonCard = ({ data, title = '📊 Comparativo por Ano' }) => {
   }, [orders, yearsAvailable]);
 
   const selectedYearsSorted = useMemo(
-    () => (selectedYears || []).slice().sort((a, b) => Number(a) - Number(b)),
-    [selectedYears]
+    () => (selectedYearsEffective || []).slice().sort((a, b) => Number(a) - Number(b)),
+    [selectedYearsEffective]
+  );
+
+  const getMetric = useCallback(
+    (year) =>
+      metricsByYear.get(String(year)) || {
+        year: String(year),
+        totalDemandas: 0,
+        concluidas: 0,
+        pendentes: 0,
+        atrasadas: 0,
+        clientesUnicos: new Set(),
+        tiposUnicos: new Set(),
+      },
+    [metricsByYear]
   );
 
   const tableRows = useMemo(() => {
@@ -274,17 +294,17 @@ const YearComparisonCard = ({ data, title = '📊 Comparativo por Ano' }) => {
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 14 }}>
           {tableRows.map((row) => {
-            const values = selectedYearsSorted.map((y) => row.get(metricsByYear.get(y)));
+            const values = selectedYearsSorted.map((y) => row.get(getMetric(y)));
             const max = Math.max(...values, 1);
             return (
               <div key={row.key} style={{ border: '1px solid #E5E7EB', borderRadius: 12, padding: 14 }}>
                 <div style={{ fontWeight: 800, color: '#374151', marginBottom: 10 }}>{row.label}</div>
                 <div style={{ display: 'grid', gridTemplateColumns: `repeat(${selectedYearsSorted.length}, 1fr)`, gap: 10 }}>
                   {selectedYearsSorted.map((y, idx) => {
-                    const m = metricsByYear.get(y);
+                    const m = getMetric(y);
                     const v = row.get(m);
                     const prevYear = idx > 0 ? selectedYearsSorted[idx - 1] : null;
-                    const prevVal = prevYear ? row.get(metricsByYear.get(prevYear)) : null;
+                    const prevVal = prevYear ? row.get(getMetric(prevYear)) : null;
                     const showDelta = idx > 0;
                     return (
                       <div key={y} style={{ background: '#F8FAFC', borderRadius: 10, padding: 10, border: '1px solid #E2E8F0' }}>

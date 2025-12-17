@@ -246,25 +246,37 @@ function App() {
         integrityCheck: null
       };
     
-    // Calcular métricas tradicionais com o objeto filtrado completo
-    const traditionalMetrics = DataProcessingService.calculateAdvancedMetrics(filteredData, filters);
-    
-    // Adicionar awareness de fonte
-    const sourceAwareCount = dataStandardizer.getStandardizedCount(filteredData, {
-      year: filters.periodo === '2024' ? '2024' : filters.periodo === '2025' ? '2025' : 'all',
-      type: filters.tipo === 'relatorios' ? 'relatorios' : 'all',
-      cliente: filters.cliente === 'todos' ? 'all' : filters.cliente,
-      showBreakdown: true
-    });
-    
-    const integrityCheck = dataStandardizer.validateDataIntegrity(filteredData);
-    
-    return {
-      ...traditionalMetrics,
-      sourceBreakdown: sourceAwareCount.breakdown,
-      sourceDefinitions: sourceAwareCount.sourceDefinitions,
-      integrityCheck: integrityCheck
-    };
+    try {
+      // Calcular métricas tradicionais com o objeto filtrado completo
+      const traditionalMetrics = DataProcessingService.calculateAdvancedMetrics(filteredData, filters);
+
+      // Adicionar awareness de fonte (pode falhar dependendo do shape/estado durante transições)
+      const sourceAwareCount = dataStandardizer.getStandardizedCount(filteredData, {
+        year: filters.periodo === '2024' ? '2024' : filters.periodo === '2025' ? '2025' : 'all',
+        type: filters.tipo === 'relatorios' ? 'relatorios' : 'all',
+        cliente: filters.cliente === 'todos' ? 'all' : filters.cliente,
+        showBreakdown: true
+      });
+
+      const integrityCheck = dataStandardizer.validateDataIntegrity(filteredData);
+
+      return {
+        ...traditionalMetrics,
+        sourceBreakdown: sourceAwareCount?.breakdown || { sheets: 0, notion: 0, unknown: 0 },
+        sourceDefinitions: sourceAwareCount?.sourceDefinitions || null,
+        integrityCheck: integrityCheck || null
+      };
+    } catch (e) {
+      // ✅ Não deixar o dashboard cair (tela branca) por erro de métrica auxiliar
+      console.error('❌ [METRICS] Falha ao calcular métricas auxiliares:', e);
+      const traditionalMetrics = DataProcessingService.calculateAdvancedMetrics(filteredData, filters);
+      return {
+        ...traditionalMetrics,
+        sourceBreakdown: { sheets: 0, notion: 0, unknown: 0 },
+        sourceDefinitions: null,
+        integrityCheck: null
+      };
+    }
   }, [filteredData, filters]);
 
   const monthlyGrowth = React.useMemo(() => {
