@@ -278,8 +278,9 @@ export class DataProcessingService {
   static filterOrdersByPeriod(orders = [], periodo) {
     if (!Array.isArray(orders) || orders.length === 0) return [];
     if (!periodo || periodo === 'ambos') return orders;
-    const yearTarget = periodo === '2024' ? 2024 : periodo === '2025' ? 2025 : null;
-    if (!yearTarget) return orders;
+    const p = String(periodo);
+    const yearTarget = /^\d{4}$/.test(p) ? parseInt(p, 10) : null;
+    if (!yearTarget || Number.isNaN(yearTarget)) return orders;
     return orders.filter((o) => {
       const dt = this.parseDeliveryDate(o);
       return dt ? dt.getFullYear() === yearTarget : false;
@@ -809,6 +810,9 @@ export class DataProcessingService {
     try {
       const trendData = this.processTrendData(data, filters);
       const actualCurrentMonthIndex = new Date().getMonth();
+      const actualCurrentYear = new Date().getFullYear();
+      const periodoStr = filters?.periodo ? String(filters.periodo) : 'ambos';
+      const selectedYear = /^\d{4}$/.test(periodoStr) && periodoStr !== 'ambos' ? parseInt(periodoStr, 10) : null;
 
       const currentData = data.visaoGeral || [];
       const dados2024Visao = data.visaoGeral2024 || [];
@@ -1106,6 +1110,30 @@ export class DataProcessingService {
         ? ((overallAvg2025 - overallAvg2024) / overallAvg2024) * 100
         : 0;
 
+      // ✅ Novo: produtividade/média mensal para "ano específico" (ex.: 2026) baseada nos dados filtrados
+      // Observação: com o pipeline atual, quando `filters.periodo` é um ano, `originalOrders` já chega recortado por ano.
+      const effectiveOrdersForYear = selectedYear
+        ? dadosOriginais.filter((o) => {
+            const dt = this.parseDeliveryDate(o);
+            return dt ? dt.getFullYear() === selectedYear : false;
+          })
+        : dadosOriginais;
+
+      const monthsSet = new Set();
+      for (const o of effectiveOrdersForYear) {
+        const dt = this.parseDeliveryDate(o);
+        if (!dt) continue;
+        // Se o ano selecionado é o ano atual, ignorar meses futuros (mantém coerência com "média progressiva")
+        const y = dt.getFullYear();
+        const m = dt.getMonth();
+        if (selectedYear && y !== selectedYear) continue;
+        if (selectedYear && selectedYear === actualCurrentYear && m > actualCurrentMonthIndex) continue;
+        monthsSet.add(`${y}-${m}`);
+      }
+      const monthsWithDataForYear = monthsSet.size || 0;
+      const produtividadeAnoSelecionado =
+        monthsWithDataForYear > 0 ? effectiveOrdersForYear.length / monthsWithDataForYear : 0;
+
       const uniqueClients = new Set();
       let totalRelatorios = 0;
       currentData.forEach(item => {
@@ -1126,8 +1154,10 @@ export class DataProcessingService {
         crescimentoDemandas: this.roundToDecimal(crescimento, 0),
         mediaMensal2024: this.formatDisplayValue(overallAvg2024, 1),
         mediaMensal2025: this.formatDisplayValue(overallAvg2025, 1),
-        mediaMensal: this.formatDisplayValue(overallAvg2025, 1),
-        produtividade: this.formatDisplayValue(overallAvg2025, 1),
+        // Se um ano específico foi selecionado (2024/2025/2026...), usa a média daquele recorte.
+        // Caso contrário (ambos), mantém o comportamento legado baseado no "ano atual" (2025).
+        mediaMensal: this.formatDisplayValue(selectedYear ? produtividadeAnoSelecionado : overallAvg2025, 1),
+        produtividade: this.formatDisplayValue(selectedYear ? produtividadeAnoSelecionado : overallAvg2025, 1),
         // 🆕 NOVAS PROPRIEDADES CORRIGIDAS
         totalDemandas2024: totalDemandas2024,
         totalDemandas2025: totalDemandas2025,
@@ -1586,7 +1616,8 @@ export class DataProcessingService {
     console.log('📅 [PERÍODO] Aplicando filtro:', periodo);
     if (periodo === 'ambos' || !periodo) return data;
 
-    if (periodo === '2024') {
+    // Mantém compatibilidade com o legado (arrays pré-computados 2024)
+    if (String(periodo) === '2024') {
       return {
         ...data,
         visaoGeral: data.visaoGeral2024 || [],
@@ -1597,7 +1628,8 @@ export class DataProcessingService {
         diagnosticos: data.diagnosticos2024 || []
       };
     }
-    if (periodo === '2025') {
+    // Mantém compatibilidade com o legado (arrays "atuais")
+    if (String(periodo) === '2025') {
       return {
         ...data,
         visaoGeral: data.visaoGeral || [],
@@ -1608,6 +1640,8 @@ export class DataProcessingService {
         diagnosticos: data.diagnosticos || []
       };
     }
+    // Para qualquer outro ano (ex.: 2026+), o recorte real é aplicado em `applyMonthAndPeriodCut`,
+    // que filtra `originalOrders` e reconstrói as agregações.
     return data;
   }
 

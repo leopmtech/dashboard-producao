@@ -19,6 +19,7 @@ import CompanyComparisonChart from './components/CompanyComparisonChart';
 import DesignProductionChart from './components/DesignProductionChart';
 import ReviewProductionChart from './components/ReviewProductionChart';
 import CollaboratorDemands from './components/CollaboratorDemands';
+import YearComparisonCard from './components/YearComparisonCard';
 
 // Novos componentes analíticos
 import InteractiveHeatmap from './components/InteractiveHeatmap';
@@ -218,6 +219,15 @@ function App() {
       registros: dataParaFiltrar.originalOrders?.length || 0
     });
     return DataProcessingService.applyAdvancedFilters(dataParaFiltrar, filters);
+  }, [dataParaFiltrar, filters]);
+
+  // ✅ Dataset para o card "Comparativo por Ano":
+  // mantém os filtros (cliente/tipo/mês), mas NÃO restringe por `periodo`,
+  // permitindo comparar múltiplos anos simultaneamente.
+  const filteredDataForYearComparison = React.useMemo(() => {
+    if (!dataParaFiltrar) return null;
+    const f = { ...filters, periodo: 'ambos' };
+    return DataProcessingService.applyAdvancedFilters(dataParaFiltrar, f);
   }, [dataParaFiltrar, filters]);
 
   const metrics = React.useMemo(() => {
@@ -583,7 +593,22 @@ function App() {
                 : `Dados consolidados (Sheets + Notion) • ${chartData.trend?.length || 0} meses processados`
             }
             showComparison={filters.periodo === 'ambos'}
+            orders={(filteredDataForYearComparison || filteredData || data)?.originalOrders || []}
+            initialSelectedYears={
+              (() => {
+                if (filters.periodo === '2024' || filters.periodo === '2025') return [filters.periodo];
+                // padrão: comparar últimos 2 anos (se existirem)
+                return null;
+              })()
+            }
           />
+        </div>
+      </div>
+
+      {/* 📊 Comparativo por Ano (multi-year) */}
+      <div className="charts-row modern">
+        <div className="chart-col-full">
+          <YearComparisonCard data={filteredDataForYearComparison || filteredData || data} />
         </div>
       </div>
 
@@ -1067,6 +1092,7 @@ function App() {
                   <option value="ambos">📊 Comparativo 2024 vs 2025 (12 meses)</option>
                   <option value="2024">📅 Apenas 2024 (Histórico)</option>
                   <option value="2025">📅 Apenas 2025 (Atual)</option>
+                  <option value="2026">📅 Apenas 2026</option>
                 </select>
               </div>
 

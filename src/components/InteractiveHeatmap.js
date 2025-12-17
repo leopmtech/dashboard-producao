@@ -58,6 +58,7 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
     const totalsByClientYear = new Map(); // `${client}|${year}` -> total
     const clients2024 = new Set();
     const clients2025 = new Set();
+    const clients2026 = new Set();
 
     // 🧮 DEBUG: registros incluídos (já com clientes canônicos)
     const includedOrders = [];
@@ -92,6 +93,7 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
 
         if (year === '2024') clients2024.add(clientName);
         if (year === '2025') clients2025.add(clientName);
+        if (year === '2026') clients2026.add(clientName);
       }
     }
 
@@ -136,7 +138,10 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
         
         selectedYears.forEach(year => {
           const byYear = counts.get(clientName) || {};
-          const value = byYear[String(year)]?.[monthIndex] || 0;
+          // ✅ Só zerar "meses futuros" para o ANO ATUAL (não impactar 2024, 2026 etc.)
+          const isFutureForThisYear = Number(year) === currentYear && monthIndex > currentMonth;
+          const raw = byYear[String(year)]?.[monthIndex] || 0;
+          const value = isFutureForThisYear ? 0 : raw;
           yearData[year] = value;
           totalValue += value;
         });
@@ -164,29 +169,31 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
         // Determinar se é período da nova gestão (abril 2024 em diante)
         const isNovaGestao = (monthIndex >= 3); // Abril em diante
 
-        // Determinar se cliente é novo em 2025
+        // Determinar se cliente é novo no ano seguinte (2024→2025 ou 2025→2026)
         const isNewClient2025 =
           selectedYears.includes('2025') &&
           selectedYears.includes('2024') &&
           clients2025.has(clientName) &&
           !clients2024.has(clientName);
+        const isNewClient2026 =
+          selectedYears.includes('2026') &&
+          selectedYears.includes('2025') &&
+          clients2026.has(clientName) &&
+          !clients2025.has(clientName);
                                 
-        // Verificar se o mês é futuro (para não mostrar dados futuros)
-        const isFutureMonth = (currentYear === 2025 && monthIndex > currentMonth) || 
-                             (currentYear > 2025);
-
         return {
           client: clientName,
           month: month,
           monthIndex,
-          value: isFutureMonth ? 0 : totalValue, // Zero para meses futuros
-          displayValue: isFutureMonth ? 0 : displayValue, // Zero para meses futuros
+          value: totalValue,
+          displayValue: displayValue,
           intensity: intensity,
           yearData: yearData, // Dados separados por ano
           isSelected: selectedClient === clientName || selectedMonth === month,
           isHighlighted: hoveredCell?.client === clientName || hoveredCell?.month === month,
           isNovaGestao: isNovaGestao,
           isNewClient2025: isNewClient2025,
+          isNewClient2026: isNewClient2026,
           selectedYears: selectedYears
         };
       });
@@ -211,7 +218,7 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
       }
     });
 
-    return { clients, months: filteredMonths, matrix, maxValue, totalSum, _clients2024: clients2024, _clients2025: clients2025, _counts: counts };
+    return { clients, months: filteredMonths, matrix, maxValue, totalSum, _clients2024: clients2024, _clients2025: clients2025, _clients2026: clients2026, _counts: counts };
   }, [data, selectedClient, selectedMonth, hoveredCell, viewMode, selectedYears]);
 
   // Obter cor da célula baseada na intensidade e contexto
@@ -226,8 +233,8 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
       return `rgba(59, 130, 246, ${opacity})`; // Azul para comparativo
     }
     
-    // Se cliente novo em 2025, usar verde
-    if (cell.isNewClient2025) {
+    // Se cliente novo no ano seguinte (2025/2026), usar verde
+    if (cell.isNewClient2025 || cell.isNewClient2026) {
       const opacity = 0.2 + (intensity * 0.6);
       return `rgba(16, 185, 129, ${opacity})`;
     }
@@ -250,38 +257,50 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
     const stats = {
       total2024: 0,
       total2025: 0,
+      total2026: 0,
       average2024: 0,
       average2025: 0,
+      average2026: 0,
       peak: 0,
       activeMonths: 0,
       isNewIn2025: false,
-      leftIn2025: false
+      leftIn2025: false,
+      isNewIn2026: false,
+      leftIn2026: false
     };
 
     const byYear = heatmapData?._counts?.get(clientName) || {};
     const values2024 = byYear['2024'] || new Array(12).fill(0);
     const values2025 = byYear['2025'] || new Array(12).fill(0);
+    const values2026 = byYear['2026'] || new Array(12).fill(0);
 
     const total2024 = values2024.reduce((a, b) => a + (b || 0), 0);
     const total2025 = values2025.reduce((a, b) => a + (b || 0), 0);
+    const total2026 = values2026.reduce((a, b) => a + (b || 0), 0);
 
     stats.total2024 = total2024;
     stats.total2025 = total2025;
+    stats.total2026 = total2026;
 
     const nonZero2024 = values2024.filter((v) => v > 0);
     const nonZero2025 = values2025.filter((v) => v > 0);
+    const nonZero2026 = values2026.filter((v) => v > 0);
 
     stats.average2024 = nonZero2024.length > 0 ? Math.round((nonZero2024.reduce((s, v) => s + v, 0) / nonZero2024.length) * 10) / 10 : 0;
     stats.average2025 = nonZero2025.length > 0 ? Math.round((nonZero2025.reduce((s, v) => s + v, 0) / nonZero2025.length) * 10) / 10 : 0;
-    stats.peak = Math.max(stats.peak, ...(values2024 || []), ...(values2025 || []));
-    stats.activeMonths += nonZero2024.length + nonZero2025.length;
+    stats.average2026 = nonZero2026.length > 0 ? Math.round((nonZero2026.reduce((s, v) => s + v, 0) / nonZero2026.length) * 10) / 10 : 0;
+    stats.peak = Math.max(stats.peak, ...(values2024 || []), ...(values2025 || []), ...(values2026 || []));
+    stats.activeMonths += nonZero2024.length + nonZero2025.length + nonZero2026.length;
 
     // Detectar status do cliente
     const existsIn2024 = total2024 > 0;
     const existsIn2025 = total2025 > 0;
+    const existsIn2026 = total2026 > 0;
     
     stats.isNewIn2025 = !existsIn2024 && existsIn2025;
     stats.leftIn2025 = existsIn2024 && !existsIn2025;
+    stats.isNewIn2026 = !existsIn2025 && existsIn2026;
+    stats.leftIn2026 = existsIn2025 && !existsIn2026;
 
     return stats;
   };
@@ -363,6 +382,22 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
               }}
             >
               📅 2025
+            </button>
+            <button
+              onClick={() => toggleYear('2026')}
+              style={{
+                padding: '8px 12px',
+                background: selectedYears.includes('2026') ? '#2563EB' : 'transparent',
+                color: selectedYears.includes('2026') ? 'white' : '#6B7280',
+                border: 'none',
+                borderRadius: '6px',
+                fontSize: '0.875rem',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              📅 2026
             </button>
           </div>
 
@@ -737,6 +772,30 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
               </div>
             </>
           )}
+
+          {selectedYears.includes('2026') && selectedYears.includes('2025') && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ 
+                  width: '6px', 
+                  height: '6px', 
+                  background: '#10B981',
+                  borderRadius: '50%'
+                }} />
+                <span style={{ fontSize: '0.875rem', color: '#374151' }}>Novo Cliente 2026</span>
+              </div>
+              
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ 
+                  width: '6px', 
+                  height: '6px', 
+                  background: '#EF4444',
+                  borderRadius: '50%'
+                }} />
+                <span style={{ fontSize: '0.875rem', color: '#374151' }}>Saiu em 2026</span>
+              </div>
+            </>
+          )}
         </div>
 
         <div style={{ fontSize: '0.875rem', color: '#6B7280' }}>
@@ -844,6 +903,28 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
                       </div>
                     </>
                   )}
+
+                  {selectedYears.includes('2026') && (
+                    <>
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#2563EB' }}>
+                          {stats.total2026}
+                        </div>
+                        <div style={{ fontSize: '0.875rem', color: '#6B7280' }}>
+                          Total 2026
+                        </div>
+                      </div>
+                      
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#2563EB' }}>
+                          {stats.average2026}
+                        </div>
+                        <div style={{ fontSize: '0.875rem', color: '#6B7280' }}>
+                          Média 2026
+                        </div>
+                      </div>
+                    </>
+                  )}
                   
                   <div style={{ textAlign: 'center' }}>
                     <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#10B981' }}>
@@ -885,6 +966,34 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
                     </div>
                   )}
 
+                  {stats.isNewIn2026 && (
+                    <div style={{
+                      padding: '6px 12px',
+                      background: 'rgba(16, 185, 129, 0.1)',
+                      border: '1px solid rgba(16, 185, 129, 0.3)',
+                      borderRadius: '20px',
+                      fontSize: '0.75rem',
+                      color: '#059669',
+                      fontWeight: '600'
+                    }}>
+                      🆕 Novo Cliente 2026
+                    </div>
+                  )}
+                  
+                  {stats.leftIn2026 && (
+                    <div style={{
+                      padding: '6px 12px',
+                      background: 'rgba(239, 68, 68, 0.1)',
+                      border: '1px solid rgba(239, 68, 68, 0.3)',
+                      borderRadius: '20px',
+                      fontSize: '0.75rem',
+                      color: '#DC2626',
+                      fontWeight: '600'
+                    }}>
+                      ⚠️ Saiu em 2026
+                    </div>
+                  )}
+
                   {selectedYears.includes('2024') && selectedYears.includes('2025') && stats.total2025 > stats.total2024 && (
                     <div style={{
                       padding: '6px 12px',
@@ -896,6 +1005,20 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
                       fontWeight: '600'
                     }}>
                       📈 Crescimento no Ano Vigente                    </div>
+                  )}
+
+                  {selectedYears.includes('2025') && selectedYears.includes('2026') && stats.total2026 > stats.total2025 && (
+                    <div style={{
+                      padding: '6px 12px',
+                      background: 'rgba(37, 99, 235, 0.08)',
+                      border: '1px solid rgba(37, 99, 235, 0.25)',
+                      borderRadius: '20px',
+                      fontSize: '0.75rem',
+                      color: '#1D4ED8',
+                      fontWeight: '600'
+                    }}>
+                      📈 Crescimento 2026 vs 2025
+                    </div>
                   )}
                 </div>
               </div>
@@ -950,6 +1073,56 @@ const InteractiveHeatmap = ({ data, onCellClick, title = "Heatmap de Produção"
                   </div>
                   <div style={{ fontSize: '0.75rem', color: '#6B7280' }}>
                     {sairam.length > 0 ? sairam.join(', ') : 'Nenhum'}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* Resumo dos Novos Clientes (2025 → 2026) */}
+      {selectedYears.includes('2026') && selectedYears.includes('2025') && data && Array.isArray(data) && (
+        <div style={{
+          marginTop: '16px',
+          padding: '16px',
+          background: 'rgba(37, 99, 235, 0.05)',
+          border: '1px solid rgba(37, 99, 235, 0.2)',
+          borderRadius: '8px'
+        }}>
+          <h5 style={{ 
+            color: '#2563EB', 
+            margin: '0 0 12px 0',
+            fontSize: '1rem',
+            fontWeight: '600'
+          }}>
+            🔄 Mudanças na Base de Clientes (2025 → 2026)
+          </h5>
+          
+          {(() => {
+            const clientes2025 = heatmapData?._clients2025 ? Array.from(heatmapData._clients2025) : [];
+            const clientes2026 = heatmapData?._clients2026 ? Array.from(heatmapData._clients2026) : [];
+
+            const set2025 = new Set(clientes2025);
+            const set2026 = new Set(clientes2026);
+
+            const novos = Array.from(set2026).filter(c => !set2025.has(c));
+            const sairam = Array.from(set2025).filter(c => !set2026.has(c));
+
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
+                <div>
+                  <div style={{ fontWeight: 700, color: '#2563EB', marginBottom: 8 }}>🆕 Novos (2026)</div>
+                  <div style={{ fontSize: '0.875rem', color: '#374151' }}>
+                    {novos.length ? novos.slice(0, 12).join(', ') : '—'}
+                    {novos.length > 12 ? ` (+${novos.length - 12})` : ''}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, color: '#DC2626', marginBottom: 8 }}>⚠️ Saíram (2026)</div>
+                  <div style={{ fontSize: '0.875rem', color: '#374151' }}>
+                    {sairam.length ? sairam.slice(0, 12).join(', ') : '—'}
+                    {sairam.length > 12 ? ` (+${sairam.length - 12})` : ''}
                   </div>
                 </div>
               </div>
