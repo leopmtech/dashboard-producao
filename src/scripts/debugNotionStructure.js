@@ -11,7 +11,7 @@ const config = {
     endpoint: analysisConfig.credentials?.notion?.endpointQuery,
     headers: {
       'Authorization': `Bearer ${analysisConfig.credentials?.notion?.token}`,
-      'Notion-Version': '2022-06-28',
+      'Notion-Version': '2025-09-03',
       'Content-Type': 'application/json'
     }
   }

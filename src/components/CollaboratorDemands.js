@@ -1,4 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
+import notionService from '../services/notionService';
+
+const DEFAULT_COLLAB_DB_ID = '37f13b4723764d5db4ec94b259430b7c';
 
 const isRecurring = (tipo) => {
   if (!tipo || typeof tipo !== 'string') return false;
@@ -19,6 +22,8 @@ const isRecurring = (tipo) => {
 const isCompleted = (order) => {
   const s = (order.status || '').toString();
   return (
+    order.isConcluido === true ||
+    order.concluido === 'yes' || order.concluido === 'YES' ||
     order.concluida === 'YES' || order.concluido === 'YES' || order.concluída === 'YES' || order.concluido === true ||
     s === 'Concluído' || s === 'Concluido' || s === 'CONCLUÍDO' || s === 'CONCLUIDO' ||
     s === 'concluído' || s === 'concluido' || s === 'FINALIZADO' || s === 'finalizado' ||
@@ -100,10 +105,52 @@ const buildMonthGrid = (date) => {
   return weeks;
 };
 
-const CollaboratorDemands = ({ data, title = 'Demandas por Colaborador' }) => {
-  const orders = Array.isArray(data?.originalOrders) ? data.originalOrders : [];
+const CollaboratorDemands = ({ data, title = 'Demandas por Colaborador', databaseId = DEFAULT_COLLAB_DB_ID }) => {
+  const [orders, setOrders] = useState([]);
+  const [sourceError, setSourceError] = useState(null);
+  const [sourceLoading, setSourceLoading] = useState(false);
+  const [lastSync, setLastSync] = useState(null);
   const [selected, setSelected] = useState('Todos');
   const [refDate, setRefDate] = useState(new Date());
+
+  // ✅ Fonte única: busca direto do banco informado (tempo real via polling leve)
+  useEffect(() => {
+    let isMounted = true;
+    let interval = null;
+
+    const load = async (reason = 'initial') => {
+      try {
+        setSourceLoading(true);
+        setSourceError(null);
+
+        const fetched = await notionService.getOrdersFromDatabase({
+          dbId: databaseId,
+          useCache: true,
+          ttlMs: 10_000
+        });
+
+        if (!isMounted) return;
+        setOrders(Array.isArray(fetched) ? fetched : []);
+        setLastSync(new Date());
+      } catch (e) {
+        if (!isMounted) return;
+        // fallback: usar dados do dashboard se houver
+        const fallbackOrders = Array.isArray(data?.originalOrders) ? data.originalOrders : [];
+        setOrders(fallbackOrders);
+        setSourceError(e?.message || String(e));
+      } finally {
+        if (isMounted) setSourceLoading(false);
+      }
+    };
+
+    load('mount');
+    interval = setInterval(() => load('poll'), 30_000);
+
+    return () => {
+      isMounted = false;
+      if (interval) clearInterval(interval);
+    };
+  }, [databaseId, data?.originalOrders]);
 
   // DEBUG VALIDATION: verificar caso específico solicitado (pode ser removido depois)
   React.useEffect(() => {
@@ -142,37 +189,56 @@ const CollaboratorDemands = ({ data, title = 'Demandas por Colaborador' }) => {
     }
   }, [orders]);
 
+  // Dedupe por tarefa para evitar contagens erradas (mesma demanda entrando duplicada)
+  const uniqueOrders = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    for (const o of orders || []) {
+      const id = o?.id || o?._id || o?.orderId || JSON.stringify(o);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(o);
+    }
+    return out;
+  }, [orders]);
+
   const collaborators = useMemo(() => {
     const setNames = new Set();
-    orders.forEach(o => {
-      if (isRecurring(o.tipoDemanda)) return;
+    uniqueOrders.forEach(o => {
+      // ✅ Mostrar TODAS as demandas não concluídas (inclui recorrentes),
+      // para refletir fielmente o banco de dados.
       if (isCompleted(o)) return;
       const names = getCollaboratorsFromField(o.quemExecuta || o.analista || o.responsavel);
-      names.forEach(n => setNames.add(n));
+      // dedupe local de nomes por tarefa
+      const local = new Set(names.map(n => n.toLowerCase()));
+      names.forEach(n => {
+        if (local.has(n.toLowerCase())) setNames.add(n);
+      });
     });
     return ['Todos', ...Array.from(setNames).sort()];
-  }, [orders]);
+  }, [uniqueOrders]);
 
   const inProgressThisMonth = useMemo(() => {
     const year = refDate.getFullYear();
     const month = refDate.getMonth();
     const map = new Map(); // name -> count
     const eventsByDay = {}; // yyyy-mm-dd -> [{...order, names}]
-    orders.forEach(o => {
-      if (isRecurring(o.tipoDemanda)) return;
+    uniqueOrders.forEach(o => {
       if (isCompleted(o)) return;
       const dt = getDeliveryDate(o);
       if (!dt) return;
       if (dt.getFullYear() !== year || dt.getMonth() !== month) return;
       const names = getCollaboratorsFromField(o.quemExecuta || o.analista || o.responsavel);
       if (names.length === 0) return;
-      names.forEach(n => map.set(n, (map.get(n) || 0) + 1));
+      // ✅ Contar cada demanda apenas uma vez por colaborador
+      const uniqueNames = Array.from(new Set(names.map(n => n.trim()).filter(Boolean)));
+      uniqueNames.forEach(n => map.set(n, (map.get(n) || 0) + 1));
       const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
       if (!eventsByDay[key]) eventsByDay[key] = [];
-      eventsByDay[key].push({ ...o, names, _deliveryDate: dt });
+      eventsByDay[key].push({ ...o, names: uniqueNames, _deliveryDate: dt });
     });
     return { counts: map, eventsByDay };
-  }, [orders, refDate]);
+  }, [uniqueOrders, refDate]);
 
   const monthWeeks = useMemo(() => buildMonthGrid(refDate), [refDate]);
 
@@ -187,7 +253,12 @@ const CollaboratorDemands = ({ data, title = 'Demandas por Colaborador' }) => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <div>
           <h3 className="chart-title">{title}</h3>
-          <p className="chart-subtitle">Atividades em andamento (não recorrentes) por colaborador</p>
+          <p className="chart-subtitle">
+            Demandas pendentes por colaborador • Fonte: Notion DB {String(databaseId).slice(0, 8)}…
+            {lastSync ? ` • Atualizado: ${lastSync.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : ''}
+            {sourceLoading ? ' • Sincronizando…' : ''}
+            {sourceError ? ' • ⚠️ Falha ao sincronizar (fallback local)' : ''}
+          </p>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           <button onClick={() => changeMonth(-1)} style={{ padding: '6px 10px', border: '1px solid #E5E7EB', borderRadius: '6px', background: 'white', cursor: 'pointer' }}>{'‹'}</button>

@@ -23,3 +23,9 @@ yarn-debug.log*
 yarn-error.log*
 
 .env
+
+# backups (never commit secrets)
+.env.backup
+
+# Local Netlify folder
+.netlify

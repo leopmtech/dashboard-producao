@@ -176,10 +176,13 @@ export const MOCK_NOTION_DATA = {
 
 // Função para detectar se deve usar produção (dados reais)
 export const useProductionData = () => {
-  // 1. Verificar localStorage primeiro (permite toggle persistente)
-  if (typeof window !== 'undefined' && localStorage.getItem('force-production') === 'true') {
-    console.log('🌐 [MODE] Production mode via localStorage');
-    return true;
+  // ✅ Em desenvolvimento, não usar localStorage como "modo preso" (isso gera confusão e loops).
+  // Use apenas query string para testes pontuais.
+  if (process.env.NODE_ENV === 'production') {
+    if (typeof window !== 'undefined' && localStorage.getItem('force-production') === 'true') {
+      console.log('🌐 [MODE] Production mode via localStorage');
+      return true;
+    }
   }
   
   // 2. Forçar produção via query string
@@ -216,26 +219,26 @@ export const useProductionData = () => {
 
 // Função para detectar se deve usar mock data
 export const shouldUseMockData = () => {
-  // Se forçar produção, não usar mock
-  if (useProductionData()) {
-    return false;
+  // ✅ Mock agora é SOMENTE por override explícito.
+  // Motivo: o app deve sempre tentar a API primeiro; mock vira fallback/override.
+  if (useProductionData()) return false;
+
+  if (typeof window === 'undefined') return false;
+
+  // 1) Forçar mock via localStorage (toggle persistente)
+  if (localStorage.getItem('force-mock') === 'true') {
+    console.log('🔧 [MOCK] Forced via localStorage (force-mock=true)');
+    return true;
   }
-  
-  const isDevelopment = process.env.NODE_ENV === 'development';
-  const isReactDevServer = window.location.port === '3000' || 
-                          (window.location.hostname === 'localhost' && 
-                           (window.location.port === '' || window.location.port === '3000'));
-  const isNotNetlifyDev = window.location.port !== '8888';
-  
-  const shouldUse = isDevelopment && isReactDevServer && isNotNetlifyDev;
-  
-  if (shouldUse) {
-    console.log('🔧 [MOCK] Will use mock data');
-  } else {
-    console.log('🌐 [PROD] Will use production data');
+
+  // 2) Forçar mock via query string
+  if (window.location.search.includes('force-mock=true')) {
+    console.log('🔧 [MOCK] Forced via query string (force-mock=true)');
+    localStorage.setItem('force-mock', 'true');
+    return true;
   }
-  
-  return shouldUse;
+
+  return false;
 };
 
 // Função para simular delay de rede

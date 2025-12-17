@@ -15,6 +15,102 @@ export class DataProcessingService {
   static GRUPO_EMPRESAS = ['in.Pacto','STA','Holding','Listening'];
 
   // ==========================================
+  // CLIENTES - NORMALIZAÇÃO / ALIASES
+  // ==========================================
+  /**
+   * Mapa de aliases -> nome canônico.
+   * A chave é normalizada via `normalizeClientKey`.
+   *
+   * Obs: manter este mapa pequeno e explícito para evitar unificações incorretas.
+   * Exemplos:
+   * - "ABL" e "STA" tratados como a mesma entidade quando representam o mesmo cliente.
+   */
+  static CLIENT_ALIASES = {
+    // Exemplo citado pelo usuário
+    abl: 'STA',
+
+    // Proteções básicas (variações comuns)
+    'sta': 'STA',
+    'in.pacto': 'in.Pacto',
+    'inpacto': 'in.Pacto',
+    'in pacto': 'in.Pacto',
+  };
+
+  static normalizeClientKey(name) {
+    if (!name) return '';
+    return String(name)
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // remove acentos
+      .replace(/[^\w\s.]/g, '')       // remove pontuação “dura” (mantém ponto)
+      .trim();
+  }
+
+  static canonicalizeClientName(name) {
+    if (!name) return '';
+    const raw = String(name).trim();
+    if (!raw) return '';
+
+    const key = this.normalizeClientKey(raw);
+    if (!key) return '';
+
+    const mapped = this.CLIENT_ALIASES[key];
+    if (mapped) return mapped;
+
+    // Heurística conservadora:
+    // - siglas curtas sem espaços: padronizar para UPPERCASE (ex.: "Sta" -> "STA")
+    if (!raw.includes(' ') && raw.length <= 5) return raw.toUpperCase();
+
+    // Caso padrão: manter com trim e espaços normalizados
+    return raw.replace(/\s+/g, ' ');
+  }
+
+  static splitClientString(value) {
+    if (!value) return [];
+    const s = String(value).trim();
+    if (!s) return [];
+
+    // Separadores mais comuns observados no projeto (mesma ideia do getUniqueClients)
+    const seps = [',', '/', '|', ';', '+', '&', ' e ', ' E '];
+    for (const sep of seps) {
+      if (s.includes(sep)) {
+        return s
+          .split(sep)
+          .map((x) => String(x).trim())
+          .filter(Boolean);
+      }
+    }
+    return [s];
+  }
+
+  /**
+   * Extrai clientes (canônicos e únicos) de uma order.
+   * - lida com campos `cliente1`, `Cliente`, `cliente`
+   * - divide quando houver múltiplos clientes no mesmo campo (ex.: "MIDR, in.Pacto")
+   * - aplica alias map + normalização
+   */
+  static extractCanonicalClientsFromOrder(order) {
+    if (!order) return [];
+    const campoCliente = order.cliente1 || order.Cliente || order.cliente || '';
+    const tokens = this.splitClientString(campoCliente);
+
+    const out = [];
+    const seen = new Set();
+    for (const t of tokens) {
+      const canon = this.canonicalizeClientName(t);
+      if (!canon) continue;
+      if (canon === 'Cliente Não Informado') continue;
+      const k = this.normalizeClientKey(canon);
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      out.push(canon);
+    }
+    return out;
+  }
+
+  // ==========================================
   // FILTRO DE EXCLUSÃO POR TAGS
   // ==========================================
   // Tags que devem ser excluídas das métricas de produtividade
@@ -116,6 +212,134 @@ export class DataProcessingService {
   }
 
   // ==========================================
+  // DATA / PARSE (helpers)
+  // ==========================================
+  /**
+   * Parseia a data de entrega de uma order em Date (local, sem shift de timezone).
+   * Aceita variações comuns (Date, YYYY-MM-DD, DD/MM/YYYY, ISO).
+   * @returns {Date|null}
+   */
+  static parseDeliveryDate(order) {
+    if (!order) return null;
+    const candidates = [
+      order.dataEntregaDate,
+      order.dataEntrega,
+      order.DataEntrega,
+      order.data_entrega,
+      order['Data de entrega'],
+      order['Data de Entrega'],
+      order['Data de Entrege'],
+    ];
+
+    for (const c of candidates) {
+      if (!c) continue;
+
+      if (c instanceof Date && !Number.isNaN(c.getTime())) {
+        return new Date(c.getFullYear(), c.getMonth(), c.getDate());
+      }
+
+      const s = String(c);
+
+      // DD/MM/YYYY
+      if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
+        const [dd, mm, yyyy] = s.split('/').map((n) => parseInt(n, 10));
+        if (!Number.isNaN(dd) && !Number.isNaN(mm) && !Number.isNaN(yyyy)) {
+          return new Date(yyyy, mm - 1, dd);
+        }
+      }
+
+      // YYYY-MM-DD
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+        const [yyyy, mm, dd] = s.split('-').map((n) => parseInt(n, 10));
+        if (!Number.isNaN(dd) && !Number.isNaN(mm) && !Number.isNaN(yyyy)) {
+          return new Date(yyyy, mm - 1, dd);
+        }
+      }
+
+      // ISO (YYYY-MM-DDThh:mm...)
+      if (/^\d{4}-\d{2}-\d{2}T/.test(s)) {
+        const base = s.slice(0, 10);
+        const [yyyy, mm, dd] = base.split('-').map((n) => parseInt(n, 10));
+        if (!Number.isNaN(dd) && !Number.isNaN(mm) && !Number.isNaN(yyyy)) {
+          return new Date(yyyy, mm - 1, dd);
+        }
+      }
+
+      // Fallback JS Date
+      const dt = new Date(s);
+      if (!Number.isNaN(dt.getTime())) {
+        return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+      }
+    }
+
+    return null;
+  }
+
+  static filterOrdersByPeriod(orders = [], periodo) {
+    if (!Array.isArray(orders) || orders.length === 0) return [];
+    if (!periodo || periodo === 'ambos') return orders;
+    const yearTarget = periodo === '2024' ? 2024 : periodo === '2025' ? 2025 : null;
+    if (!yearTarget) return orders;
+    return orders.filter((o) => {
+      const dt = this.parseDeliveryDate(o);
+      return dt ? dt.getFullYear() === yearTarget : false;
+    });
+  }
+
+  static filterOrdersByMonth(orders = [], mes) {
+    if (!Array.isArray(orders) || orders.length === 0) return [];
+    if (!mes || mes === 'todos') return orders;
+    const monthIndex = this.MONTH_KEYS.indexOf(mes);
+    if (monthIndex < 0) return orders;
+    return orders.filter((o) => {
+      const dt = this.parseDeliveryDate(o);
+      return dt ? dt.getMonth() === monthIndex : false;
+    });
+  }
+
+  /**
+   * Aplica recorte por período/mês em originalOrders e reconstrói agregações.
+   * Isso garante coerência para gráficos/cards que usam `originalOrders` e/ou `visaoGeral`.
+   */
+  static applyMonthAndPeriodCut(data, filters = {}) {
+    if (!data) return null;
+    const periodo = filters?.periodo || 'ambos';
+    const mes = filters?.mes || 'todos';
+
+    const shouldRebuild = (periodo && periodo !== 'ambos') || (mes && mes !== 'todos');
+    if (!shouldRebuild) return data;
+
+    let orders = Array.isArray(data.originalOrders) ? data.originalOrders : [];
+    orders = this.filterOrdersByPeriod(orders, periodo);
+    orders = this.filterOrdersByMonth(orders, mes);
+
+    const visao = this.aggregateByClient(orders);
+    const visao2024 = visao.filter((c) => (c?.['2024'] || 0) > 0);
+
+    return {
+      ...data,
+      originalOrders: orders,
+
+      // Coleções principais recomputadas
+      visaoGeral: visao,
+      visaoGeral2024: visao2024,
+      diarios: visao,
+      diarios2024: visao2024,
+      semanais: visao,
+      semanais2024: visao2024,
+      mensais: visao,
+      mensais2024: visao2024,
+      especiais: visao,
+      especiais2024: visao2024,
+      diagnosticos: visao,
+      diagnosticos2024: visao2024,
+      design: visao,
+
+      metrics: this.recalculateMetricsFromOrders(orders),
+    };
+  }
+
+  // ==========================================
   // APLICAR FILTROS - MÉTODO PRINCIPAL
   // ==========================================
   static applyAdvancedFilters(data, filters) {
@@ -175,6 +399,9 @@ export class DataProcessingService {
       visaoGeral: filteredData.visaoGeral?.length || 0
     });
 
+    // 4.5) Recorte mensal (e coerência de período em originalOrders)
+    filteredData = this.applyMonthAndPeriodCut(filteredData, filters);
+
     // 5) Recalcular totais
     filteredData = this.recalculateTotals(filteredData);
 
@@ -202,7 +429,8 @@ export class DataProcessingService {
       _source: 'notion',
       _id: `notion_${item.id || index}`,
       _sourceIndex: index,
-      cliente: item.cliente1 || item.cliente || item.Cliente || 'Cliente Não Informado',
+      // Preferir campo normalizado quando disponível
+      cliente: item.cliente || item.cliente1 || item.Cliente || 'Cliente Não Informado',
       dataEntrega: item.dataEntrega || item.DataEntrega || item.data_entrega,
       tipoDemanda: item.tipoDemanda || item.TipoDemanda || item.tipo_demanda,
       _original: item
@@ -262,8 +490,11 @@ export class DataProcessingService {
       console.log(`🏢 [CLIENTES] Processando ${orders.length} registros do Notion...`);
 
       orders.forEach((order, index) => {
-        // ✅ FOCAR ESPECIFICAMENTE NO CAMPO "Cliente" DO NOTION
-        const campoCliente = order.Cliente || order.cliente || order.cliente1;
+        // ✅ Para contagem de clientes únicos:
+        // - Preferir `cliente1` (valor bruto, ex: "Assefaz, in.Pacto") porque mantém o "grupo"
+        // - `cliente` pode vir normalizado (sem empresa), então é fallback
+        const campoCliente = order.cliente1 || order.Cliente || order.cliente;
+        const empresa = (order.empresa || '').toString().trim();
         
         // Debug dos primeiros 10 registros
         if (index < 10) {
@@ -326,6 +557,12 @@ export class DataProcessingService {
               }
             }
           });
+
+          // ✅ Também contabilizar "empresa" como cliente separado (ex.: in.Pacto/STA/Holding/Listening),
+          // mesmo quando o campo `cliente` já foi normalizado e não contém o grupo.
+          if (empresa && empresa.length >= 2) {
+            clientesSet.add(empresa);
+          }
           
           if (clientesValidosNaOrder > 0) {
             ordersComCliente++;
@@ -365,10 +602,8 @@ export class DataProcessingService {
         console.log(`  ${index + 1}. "${cliente.nome}" (${cliente.ocorrencias}x) ${cliente.separadoPor === 'múltiplos' ? '🔀' : ''}`);
       });
 
-      // ✅ VERIFICAR SE CHEGAMOS PRÓXIMO DOS 1616 REGISTROS
-      if (orders.length < 1616) {
-        console.warn(`⚠️ [CLIENTES] Esperado 1616 registros, temos ${orders.length}. Faltam ${1616 - orders.length} registros.`);
-      }
+      // ✅ Observação: total de registros varia conforme o Notion/data source.
+      // Evitar valores "esperados" hardcoded (isso era só debug histórico).
 
       // ✅ ANÁLISE DE CLIENTES MÚLTIPLOS
       const clientesMultiplos = clientesComDetalhes.filter(c => c.separadoPor === 'múltiplos');
@@ -1298,7 +1533,8 @@ export class DataProcessingService {
     if (!orders || orders.length === 0) return [];
     const stats = {};
     orders.forEach(order => {
-      const cliente = order.cliente1 || order.cliente;
+      // Preferir campo normalizado (sem empresa) quando disponível
+      const cliente = order.cliente || order.cliente1;
       if (!cliente || !cliente.trim()) return;
 
       if (!stats[cliente]) {
@@ -1314,18 +1550,17 @@ export class DataProcessingService {
       if (order.isConcluido) st.concluidos++; else st.pendentes++;
       if (order.isAtrasado) st.atrasados++;
 
-      if (order.dataEntregaDate instanceof Date) {
+      const dt = this.parseDeliveryDate(order);
+      if (dt) {
         // Verificar se a data de entrega não é futura
         const currentDate = new Date();
-        // Resetar horas para comparação apenas de data
         currentDate.setHours(0, 0, 0, 0);
-        
-        // Só processar se a data de entrega for menor ou igual à data atual
-        if (order.dataEntregaDate <= currentDate) {
-          const y = order.dataEntregaDate.getFullYear();
+
+        if (dt <= currentDate) {
+          const y = dt.getFullYear();
           if (y === 2024) st['2024']++;
           if (y === 2025) st['2025']++;
-          const m = order.dataEntregaDate.getMonth(); // 0..11
+          const m = dt.getMonth(); // 0..11
           const key = this.MONTH_KEYS[m];
           if (key) st[key]++;
         }
@@ -1380,19 +1615,80 @@ export class DataProcessingService {
     console.log('📋 [TIPO] Aplicando filtro:', tipo);
     if (!tipo || tipo === 'geral') return data;
 
-    const map = {
-      'diario':'diarios',
-      'semanal':'semanais',
-      'mensal':'mensais',
-      'especial':'especiais',
-      'diagnostico':'diagnosticos',
-      'design':'design'
+    // ✅ Para o filtro ser realmente "global" no dashboard, ele precisa recortar:
+    // - originalOrders (base de métricas, ranking, distribuição, etc.)
+    // - visaoGeral e demais coleções agregadas (derivadas de originalOrders)
+    //
+    // O valor vindo do dropdown pode ser:
+    // - 'design' (categoria)
+    // - 'diario'/'semanal'/... (legado, compatibilidade)
+    // - ou um tipo específico (ex.: "Relatório Diário", "Monitoramento ...") vindo de `uniqueDemandTypes`.
+
+    const normalize = (v) => String(v || '').trim().toLowerCase();
+    const tipoNorm = normalize(tipo);
+
+    const getOrderType = (o) => (o?.tipoDemanda || o?.TipoDemanda || o?.tipo_demanda || '').toString().trim();
+    const getOrderTypeNorm = (o) => normalize(getOrderType(o));
+
+    // Base: sempre trabalhar sobre orders já sem tarefas excluídas por tags
+    const baseOrders = this.getFilteredOriginalOrders(data);
+
+    const matchesLegacyCategory = (order) => {
+      const t = getOrderTypeNorm(order);
+      if (!t) return false;
+      if (tipoNorm === 'diario') return t.includes('diário') || t.includes('diario');
+      if (tipoNorm === 'semanal') return t.includes('semanal');
+      if (tipoNorm === 'mensal') return t.includes('mensal');
+      if (tipoNorm === 'especial') return t.includes('especial');
+      if (tipoNorm === 'diagnostico') return t.includes('diagnóstico') || t.includes('diagnostico');
+      return false;
     };
-    const sourceKey = map[tipo];
-    if (sourceKey && data[sourceKey]) {
-      return { ...data, visaoGeral: data[sourceKey] || [] };
+
+    const matchesDesignCategory = (order) => {
+      const raw = getOrderType(order);
+      const category = this.categorizeDemandType ? this.categorizeDemandType(raw) : '';
+      if (category === 'Design') return true;
+      const t = normalize(raw);
+      return t.includes('design') || t.includes('criação') || t.includes('criacao') || t.includes('arte');
+    };
+
+    const matchesSpecificType = (order) => {
+      const t = getOrderTypeNorm(order);
+      return t && t === tipoNorm;
+    };
+
+    let filteredOrders = baseOrders;
+
+    if (tipoNorm === 'design') {
+      filteredOrders = baseOrders.filter(matchesDesignCategory);
+    } else if (['diario','semanal','mensal','especial','diagnostico'].includes(tipoNorm)) {
+      filteredOrders = baseOrders.filter(matchesLegacyCategory);
+    } else {
+      // Caso padrão: tratar como um tipo de demanda específico (match exato, case-insensitive)
+      filteredOrders = baseOrders.filter(matchesSpecificType);
     }
-    return data;
+
+    const visao = this.aggregateByClient(filteredOrders);
+    const visao2024 = visao.filter((c) => (c?.['2024'] || 0) > 0);
+
+    return {
+      ...data,
+      originalOrders: filteredOrders,
+      visaoGeral: visao,
+      visaoGeral2024: visao2024,
+      diarios: visao,
+      diarios2024: visao2024,
+      semanais: visao,
+      semanais2024: visao2024,
+      mensais: visao,
+      mensais2024: visao2024,
+      especiais: visao,
+      especiais2024: visao2024,
+      diagnosticos: visao,
+      diagnosticos2024: visao2024,
+      design: visao,
+      metrics: this.recalculateMetricsFromOrders(filteredOrders),
+    };
   }
 
   static applyClientFilter(data, cliente) {

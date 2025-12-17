@@ -1,7 +1,8 @@
 // server/notionAdapter.js
 const PROP = {
   concluido: 'Concluído',
-  ordemServico: 'Ordem de serviço',
+  // ✅ Nome real do campo no Notion/CSV
+  ordemServico: 'Ordem de Serviço',
   cliente1: 'Cliente',
   cliente2: 'Cliente 2',
   tipoDemanda: 'Tipo de demanda',
@@ -53,6 +54,30 @@ const getPeople = (p) => {
 const getDate = (p) => (p?.type === 'date' ? (p.date?.start || '') : '');
 const getCheckbox = (p) => (p?.type === 'checkbox' ? !!p.checkbox : false);
 
+const GRUPO_EMPRESAS = ['in.Pacto','STA','Holding','Listening'];
+
+function parseClientes(raw) {
+  const original = (raw || '').trim();
+  if (!original) return { original: '', empresa: '', clientes: [] };
+
+  // Split simples por vírgula (é o padrão do próprio CSV)
+  const parts = original.split(',').map(s => s.trim()).filter(Boolean);
+  if (!parts.length) return { original, empresa: '', clientes: [] };
+
+  // Detecta empresa (último item se for do grupo)
+  const last = parts[parts.length - 1];
+  const empresa = GRUPO_EMPRESAS.find(e => e.toLowerCase() === String(last).toLowerCase()) || '';
+
+  const clientes = empresa ? parts.slice(0, -1) : parts.slice(0);
+
+  // Remover entradas inválidas
+  const cleaned = clientes
+    .map(c => String(c).trim())
+    .filter(c => c && c.length >= 2);
+
+  return { original, empresa, clientes: cleaned };
+}
+
 function parseDateToObj(str) {
   if (!str) return null;
   const d = new Date(str);
@@ -63,7 +88,7 @@ function rowToOrder(page) {
   try {
     const props = page.properties || {};
     const ordemServico = getText(props[PROP.ordemServico]);
-    const cliente1 = getSelectName(props[PROP.cliente1]) || getText(props[PROP.cliente1]);
+    const cliente1Raw = getSelectName(props[PROP.cliente1]) || getText(props[PROP.cliente1]);
     const cliente2 = getSelectName(props[PROP.cliente2]) || getText(props[PROP.cliente2]);
     const tipoDemanda = getSelectName(props[PROP.tipoDemanda]) || getText(props[PROP.tipoDemanda]);
     const criadoPor = getPeople(props[PROP.criadoPor]) || getText(props[PROP.criadoPor]);
@@ -73,6 +98,10 @@ function rowToOrder(page) {
     const status = getSelectName(props[PROP.status]) || getText(props[PROP.status]);
     const complexidade = getSelectName(props[PROP.complexidade]) || getText(props[PROP.complexidade]);
     const prioridade = getSelectName(props[PROP.prioridade]) || getText(props[PROP.prioridade]);
+
+    // ✅ Normalizar clientes e empresa a partir do campo "Cliente"
+    const parsed = parseClientes(cliente1Raw);
+    const clienteNorm = parsed.clientes.join(', ');
     
     // Extrair tags como array (com verificação de segurança)
     // Se o campo Tags não existir no Notion, retorna array vazio
@@ -109,7 +138,13 @@ function rowToOrder(page) {
       id: page.id,
       concluido: isDone ? 'yes' : 'no',
       ordemServico,
-      cliente1,
+      // Mantém o valor bruto do Notion para auditoria
+      cliente1: cliente1Raw,
+      // Campo consolidado (sem empresa)
+      cliente: clienteNorm || cliente1Raw,
+      // Novos campos para o frontend usar com mais precisão
+      empresa: parsed.empresa,
+      clientesArray: parsed.clientes,
       cliente2,
       tipoDemanda,
       criadoPor,
@@ -172,7 +207,12 @@ function summarize(orders) {
   const totalConcluidos = orders.filter(o => o.isConcluido).length;
   const taxaConclusao = totalDemandas > 0 ? +(totalConcluidos / totalDemandas * 100).toFixed(2) : 0;
 
-  const clientesUnicos = [...new Set(orders.map(o => o.cliente1).filter(Boolean))];
+  // ✅ Clientes únicos considerando split e removendo empresa
+  const clientesUnicos = [...new Set(
+    orders.flatMap(o => (Array.isArray(o.clientesArray) && o.clientesArray.length ? o.clientesArray : [o.cliente || o.cliente1]))
+      .map(x => String(x || '').trim())
+      .filter(Boolean)
+  )];
   const tiposDemanda = [...new Set(orders.map(o => o.tipoDemanda).filter(Boolean))];
 
   const orders2024 = orders.filter(o => o.dataEntregaDate?.getFullYear() === 2024);
@@ -206,22 +246,27 @@ function groupByClient(orders) {
   const acc = {};
   const monthNames = ['janeiro','fevereiro','marco','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
   for (const o of orders) {
-    const c = o.cliente1?.trim();
-    if (!c) continue;
-    if (!acc[c]) {
-      acc[c] = { cliente: c, total: 0, concluidos: 0, pendentes: 0, atrasados: 0, 2024: 0, 2025: 0 };
-      monthNames.forEach(m => acc[c][m] = 0);
-    }
-    const it = acc[c];
-    it.total++;
-    if (o.isConcluido) it.concluidos++; else it.pendentes++;
-    if (o.isAtrasado) it.atrasados++;
-    if (o.dataEntregaDate) {
-      const y = o.dataEntregaDate.getFullYear();
-      if (y === 2024) it['2024']++;
-      if (y === 2025) it['2025']++;
-      const m = o.dataEntregaDate.getMonth();
-      it[monthNames[m]]++;
+    const clientes = Array.isArray(o.clientesArray) && o.clientesArray.length
+      ? o.clientesArray
+      : [o.cliente || o.cliente1].map(x => String(x || '').trim()).filter(Boolean);
+
+    for (const c of clientes) {
+      if (!c) continue;
+      if (!acc[c]) {
+        acc[c] = { cliente: c, total: 0, concluidos: 0, pendentes: 0, atrasados: 0, 2024: 0, 2025: 0 };
+        monthNames.forEach(m => acc[c][m] = 0);
+      }
+      const it = acc[c];
+      it.total++;
+      if (o.isConcluido) it.concluidos++; else it.pendentes++;
+      if (o.isAtrasado) it.atrasados++;
+      if (o.dataEntregaDate) {
+        const y = o.dataEntregaDate.getFullYear();
+        if (y === 2024) it['2024']++;
+        if (y === 2025) it['2025']++;
+        const m = o.dataEntregaDate.getMonth();
+        it[monthNames[m]]++;
+      }
     }
   }
   return Object.values(acc);

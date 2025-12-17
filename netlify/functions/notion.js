@@ -33,8 +33,39 @@ const CORS_HEADERS = {
   'Content-Type': 'application/json; charset=utf-8'
 };
 
+// ✅ IMPORTANTE: Database usa múltiplas fontes de dados, REQUER versão 2025-09-03
+const NOTION_API_VERSION = '2025-09-03';
+const DEBUG_NOTION = process.env.DEBUG_NOTION === 'true';
+
+function dlog(...args) {
+  if (DEBUG_NOTION) console.log(...args);
+}
+
 function getEnv(name, fallbackName) {
-  return process.env[name] || process.env[fallbackName];
+  const value = process.env[name] || process.env[fallbackName];
+  if (!value) return null;
+  
+  // ✅ FIX: Limpeza mais robusta do token para evitar caracteres invisíveis
+  let cleaned = String(value)
+    // Remove BOM (Byte Order Mark) que pode vir de arquivos UTF-8
+    .replace(/^\uFEFF/, '')
+    // Remove espaços em branco no início e fim
+    .trim()
+    // Remove quebras de linha (Windows e Unix)
+    .replace(/[\r\n]+/g, '')
+    // Remove tabulações
+    .replace(/\t/g, '')
+    // Remove caracteres de controle invisíveis
+    .replace(/[\x00-\x1F\x7F]/g, '')
+    // Remove espaços em branco Unicode não-ASCII
+    .replace(/[\u00A0\u1680\u180E\u2000-\u200B\u2028\u2029\u202F\u205F\u3000\uFEFF]/g, '');
+  
+  // Log se houve diferença (para diagnóstico)
+  if (cleaned !== value) {
+    console.warn(`⚠️ [ENV] Token/value for ${name} was cleaned (original length: ${value.length}, cleaned length: ${cleaned.length})`);
+  }
+  
+  return cleaned || null;
 }
 
 // ✅ Função melhorada para formatar e validar Database ID
@@ -110,9 +141,14 @@ function sanitizeDatabaseId(dbId) {
 }
 
 function buildNotionClient() {
-  console.log('🔍 [BUILD CLIENT] Starting client build...');
+  dlog('🔍 [BUILD CLIENT] Starting client build...');
   
-  const token = getEnv('NOTION_TOKEN', 'REACT_APP_NOTION_TOKEN');
+  // ✅ Aceitar múltiplos nomes para o token (muitos ambientes usam NOTION_API_KEY)
+  const rawToken =
+    getEnv('NOTION_TOKEN') ||
+    getEnv('NOTION_API_KEY') ||
+    getEnv('REACT_APP_NOTION_TOKEN');
+  const token = rawToken ? String(rawToken).trim() : null;
   const dbId = getEnv('NOTION_DATABASE_ID', 'REACT_APP_NOTION_DATABASE_ID');
   
   const missing = [];
@@ -120,15 +156,14 @@ function buildNotionClient() {
     missing.push('NOTION_TOKEN');
     console.error('❌ [BUILD CLIENT] NOTION_TOKEN is missing');
   } else {
-    console.log('✅ [BUILD CLIENT] NOTION_TOKEN exists:', token.substring(0, 10) + '...');
-  }
-  
-  if (!dbId) {
-    missing.push('NOTION_DATABASE_ID');
-    console.error('❌ [BUILD CLIENT] NOTION_DATABASE_ID is missing');
-  } else {
-    console.log('🔍 [BUILD CLIENT] Raw Database ID:', dbId.substring(0, 8) + '...' + dbId.substring(dbId.length - 4));
-    console.log('🔍 [BUILD CLIENT] Database ID length:', dbId.length);
+    dlog('✅ [BUILD CLIENT] NOTION_TOKEN exists');
+    dlog('🔍 [BUILD CLIENT] Token length:', token.length);
+    dlog('🔍 [BUILD CLIENT] Token first 20 chars:', token.substring(0, 20));
+    dlog('🔍 [BUILD CLIENT] Token last 10 chars:', '...' + token.substring(token.length - 10));
+    // Verificar se há espaços ou caracteres inválidos
+    if (token.includes(' ') || token.includes('\n') || token.includes('\r')) {
+      console.warn('⚠️ [BUILD CLIENT] Token contains whitespace or newlines - trimming');
+    }
   }
   
   if (missing.length) {
@@ -137,27 +172,43 @@ function buildNotionClient() {
     throw error;
   }
   
-  const sanitizedDbId = formatDatabaseId(dbId);
-  if (!sanitizedDbId) {
-    console.error('❌ [BUILD CLIENT] Database ID formatting failed');
-    const error = new Error(`NOTION_DATABASE_ID inválido: formato incorreto. ID recebido: ${dbId.substring(0, 20)}...`);
-    error.code = 'INVALID_DB_ID';
-    throw error;
+  // ✅ DB ID é opcional: algumas rotas podem receber `dbId` via querystring.
+  // Mantemos validação quando há um ID configurado, mas não falhamos caso não exista.
+  let sanitizedDbId = null;
+  if (dbId) {
+    dlog('🔍 [BUILD CLIENT] Raw Database ID:', dbId.substring(0, 8) + '...' + dbId.substring(dbId.length - 4));
+    dlog('🔍 [BUILD CLIENT] Database ID length:', dbId.length);
+    sanitizedDbId = formatDatabaseId(dbId);
+    if (!sanitizedDbId) {
+      console.error('❌ [BUILD CLIENT] Database ID formatting failed');
+      const error = new Error(`NOTION_DATABASE_ID inválido: formato incorreto. ID recebido: ${dbId.substring(0, 20)}...`);
+      error.code = 'INVALID_DB_ID';
+      throw error;
+    }
+    dlog('✅ [BUILD CLIENT] Formatted Database ID:', sanitizedDbId.substring(0, 8) + '...');
+    dlog('✅ [BUILD CLIENT] Formatted Database ID length:', sanitizedDbId.length);
+  } else {
+    console.warn('⚠️ [BUILD CLIENT] NOTION_DATABASE_ID ausente no env; esperando dbId via query quando necessário.');
   }
   
-  console.log('✅ [BUILD CLIENT] Formatted Database ID:', sanitizedDbId.substring(0, 8) + '...');
-  console.log('✅ [BUILD CLIENT] Formatted Database ID length:', sanitizedDbId.length);
+  // Garantir que o token está limpo antes de usar
+  const cleanToken = token ? String(token).trim() : null;
+  if (!cleanToken) {
+    throw new Error('Token não pode ser vazio após limpeza');
+  }
   
   let client = null;
   try {
-    client = new Client({ auth: token, notionVersion: '2025-09-03' });
-    console.log('✅ [BUILD CLIENT] Notion Client created successfully');
+    // ✅ IMPORTANTE: Database usa múltiplas fontes de dados, REQUER versão 2025-09-03
+    client = new Client({ auth: cleanToken, notionVersion: '2025-09-03' });
+    dlog('✅ [BUILD CLIENT] Notion Client created successfully (using 2025-09-03 for multi-source databases)');
   } catch (err) {
     console.error('❌ [BUILD CLIENT] Failed to create Notion Client:', err);
+    dlog('❌ [BUILD CLIENT] Token used (first 20):', cleanToken.substring(0, 20));
     throw err;
   }
   
-  return { client, token, databaseId: sanitizedDbId };
+  return { client, token: cleanToken, databaseId: sanitizedDbId };
 }
 
 async function fetchAllFromDatabase({ client, token }, databaseId) {
@@ -177,7 +228,7 @@ async function fetchAllFromDatabase({ client, token }, databaseId) {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Notion-Version': '2025-09-03',
+          'Notion-Version': NOTION_API_VERSION,
           'Content-Type': 'application/json'
         },
         body
@@ -196,115 +247,200 @@ async function fetchAllFromDatabase({ client, token }, databaseId) {
   return pages;
 }
 
+// ✅ Função para obter o data source ID de um database multi-source
+async function getDataSourceId(token, databaseId) {
+  console.log('🔍 [DATA SOURCE] Fetching data sources for database...');
+  const resp = await fetch(`https://api.notion.com/v1/databases/${databaseId}`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Notion-Version': NOTION_API_VERSION,
+      'Content-Type': 'application/json'
+    }
+  });
+  
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`Failed to get database info: HTTP ${resp.status}: ${txt}`);
+  }
+  
+  const dbInfo = await resp.json();
+  console.log('📊 [DATA SOURCE] Database info retrieved');
+  
+  // Verificar se tem data_sources (API 2025-09-03)
+  if (dbInfo.data_sources && dbInfo.data_sources.length > 0) {
+    const dataSourceId = dbInfo.data_sources[0].id;
+    console.log('✅ [DATA SOURCE] Found data source ID:', dataSourceId.substring(0, 8) + '...');
+    console.log('📊 [DATA SOURCE] Total data sources:', dbInfo.data_sources.length);
+    console.log('📊 [DATA SOURCE] Data source name:', dbInfo.data_sources[0].name || 'Unnamed');
+    return dataSourceId;
+  }
+  
+  // Se não tem data_sources, é um database single-source (compatibilidade)
+  console.log('⚠️ [DATA SOURCE] No data_sources found - single source database');
+  return null;
+}
+
+// ✅ Função para obter TODOS os data sources (multi-source)
+async function getAllDataSources(token, databaseId) {
+  dlog('🔍 [DATA SOURCE] Fetching ALL data sources for database...');
+  const resp = await fetch(`https://api.notion.com/v1/databases/${databaseId}`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Notion-Version': NOTION_API_VERSION,
+      'Content-Type': 'application/json'
+    }
+  });
+
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`Failed to get database info: HTTP ${resp.status}: ${txt}`);
+  }
+
+  const dbInfo = await resp.json();
+  const sources = Array.isArray(dbInfo.data_sources) ? dbInfo.data_sources : [];
+
+  dlog('📊 [DATA SOURCE] Total data sources:', sources.length);
+  return sources
+    .filter(ds => ds && ds.id)
+    .map(ds => ({ id: ds.id, name: ds.name || 'Unnamed' }));
+}
+
 async function fetchNotionData({ client, token }, databaseId) {
-  console.log('🔍 [FETCH] Starting fetchNotionData...');
+  dlog('🔍 [FETCH] Starting fetchNotionData...');
   if (!databaseId || typeof databaseId !== 'string' || databaseId.trim().length === 0) {
     const err = new Error('NOTION_DATABASE_ID não configurado ou inválido');
     err.code = 'NO_DB_ID';
     throw err;
   }
   const sanitizedId = databaseId.trim();
-  console.log('🔍 [FETCH] Database ID sanitized:', `${sanitizedId.substring(0, 8)}...`);
-  console.log('🔍 [FETCH] Client available:', !!client);
-  console.log('🔍 [FETCH] Token available:', !!token);
-
+  dlog('🔍 [FETCH] Database ID sanitized:', `${sanitizedId.substring(0, 8)}...`);
+  dlog('🔍 [FETCH] Client available:', !!client);
+  dlog('🔍 [FETCH] Token available:', !!token);
+  
+  // ✅ Importante (Notion 2025-09-03 + multi-source):
+  // databases/{id}/query retorna "invalid_request_url" para este tipo de database.
+  // Portanto, consultamos diretamente TODOS os data_sources e fazemos merge.
   const results = [];
-  let hasMore = true;
-  let startCursor = undefined;
-  let pageCount = 0;
-
-  while (hasMore && pageCount < 50) {
-    pageCount += 1;
-    console.log(`🔍 [FETCH] Fetching page ${pageCount}...`);
-    let response;
-    if (client && client.databases && typeof client.databases.query === 'function') {
-      console.log('🔍 [FETCH] Using Notion Client SDK...');
-      try {
-        console.log('🔍 [FETCH] Attempting query with sort...');
-        response = await client.databases.query({
-          database_id: sanitizedId,
-          start_cursor: startCursor,
-          page_size: 100,
-          sorts: [{ property: 'Data de entrega', direction: 'descending' }]
-        });
-        console.log('✅ [FETCH] Query successful with sort');
-      } catch (sortError) {
-        console.warn('⚠️ [FETCH] Query with sort failed, trying without sort:', sortError.message);
-        response = await client.databases.query({ database_id: sanitizedId, start_cursor: startCursor, page_size: 100 });
-        console.log('✅ [FETCH] Query successful without sort');
-      }
-    } else {
-      console.log('🔍 [FETCH] Using REST API fallback...');
-      // Fallback via REST
-      const body = startCursor
-        ? { start_cursor: startCursor, page_size: 100 }
-        : { page_size: 100 };
-      // Tentar com sorts, depois sem
-      console.log('🔍 [FETCH] Attempting REST query with sort...');
-      let resp = await fetch(`https://api.notion.com/v1/databases/${sanitizedId}/query`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Notion-Version': '2025-09-03',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ ...body, sorts: [{ property: 'Data de entrega', direction: 'descending' }] })
-      });
-      if (!resp.ok) {
-        console.warn('⚠️ [FETCH] REST query with sort failed, trying without sort...');
-        resp = await fetch(`https://api.notion.com/v1/databases/${sanitizedId}/query`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Notion-Version': '2025-09-03',
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(body)
-        });
-      }
-      if (!resp.ok) {
-        const txt = await resp.text();
-        console.error('❌ [FETCH] REST query failed:', {
-          status: resp.status,
-          statusText: resp.statusText,
-          body: txt.substring(0, 500)
-        });
-        const err = new Error(`HTTP ${resp.status}: ${txt}`);
-        err.code = 'HTTP_QUERY_FAILED';
-        throw err;
-      }
-      response = await resp.json();
-      console.log('✅ [FETCH] REST query successful');
-    }
-    
-    console.log(`✅ [FETCH] Page ${pageCount} fetched:`, {
-      results_count: response.results?.length || 0,
-      has_more: response.has_more,
-      next_cursor: response.next_cursor ? 'present' : 'none'
-    });
-    
-    results.push(...response.results);
-    hasMore = response.has_more;
-    startCursor = response.next_cursor;
+  const sources = await getAllDataSources(token, sanitizedId);
+  if (!sources.length) {
+    console.warn('⚠️ [FETCH] No data_sources available; returning empty results.');
+    return [];
   }
+
+  const byId = new Map();
+  for (const src of sources) {
+    dlog('🔍 [FETCH][DS] Querying data source:', src.name, src.id.substring(0, 8) + '...');
+    let hasMore = true;
+    let startCursor = undefined;
+    let pageCount = 0;
+    try {
+      while (hasMore && pageCount < 100) {
+        pageCount += 1;
+        let response;
+        if (client && client.dataSources && typeof client.dataSources.query === 'function') {
+          response = await client.dataSources.query({
+            data_source_id: src.id,
+            start_cursor: startCursor,
+            page_size: 100
+          });
+        } else {
+          const endpoint = `https://api.notion.com/v1/data_sources/${src.id}/query`;
+          const body = startCursor ? { start_cursor: startCursor, page_size: 100 } : { page_size: 100 };
+          const resp = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Notion-Version': NOTION_API_VERSION,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body)
+          });
+          if (!resp.ok) {
+            const txt = await resp.text();
+            const err = new Error(`HTTP ${resp.status}: ${txt}`);
+            err.code = 'HTTP_QUERY_FAILED';
+            throw err;
+          }
+          response = await resp.json();
+        }
+        for (const page of (response.results || [])) {
+          if (page && page.id && !byId.has(page.id)) byId.set(page.id, page);
+        }
+        hasMore = !!response.has_more;
+        startCursor = response.next_cursor;
+        dlog(`✅ [FETCH][DS:${src.name}] Page ${pageCount}:`, { results_count: response.results?.length || 0, has_more: hasMore });
+      }
+    } catch (dsErr) {
+      // ✅ Não derrubar a função inteira se um data source falhar
+      console.warn(`⚠️ [FETCH][DS] Failed for data source "${src.name}":`, dsErr.message);
+    }
+  }
+
+  results.push(...byId.values());
 
   console.log('✅ [FETCH] All pages fetched:', {
     total_results: results.length,
-    total_pages: pageCount
+    total_sources: sources.length
   });
   return results;
+}
+
+async function fetchOrdersPage({ client, token }, databaseId, sourceId, startCursor, pageSize = 100) {
+  if (!sourceId) {
+    const err = new Error('sourceId é obrigatório para orders-page (multi-source database)');
+    err.code = 'MISSING_SOURCE_ID';
+    throw err;
+  }
+
+  let response;
+  if (client && client.dataSources && typeof client.dataSources.query === 'function') {
+    response = await client.dataSources.query({
+      data_source_id: sourceId,
+      start_cursor: startCursor || undefined,
+      page_size: pageSize
+    });
+  } else {
+    const endpoint = `https://api.notion.com/v1/data_sources/${sourceId}/query`;
+    const body = startCursor ? { start_cursor: startCursor, page_size: pageSize } : { page_size: pageSize };
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Notion-Version': NOTION_API_VERSION,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      const err = new Error(`HTTP ${resp.status}: ${txt}`);
+      err.code = 'HTTP_QUERY_FAILED';
+      throw err;
+    }
+    response = await resp.json();
+  }
+
+  const pages = response.results || [];
+  const orders = pages.map(rowToOrder).filter(Boolean);
+  return {
+    orders,
+    has_more: !!response.has_more,
+    next_cursor: response.next_cursor || null
+  };
 }
 
 exports.handler = async (event, context) => {
   // Garantir que sempre retornamos JSON, mesmo em caso de erro não esperado
   const safeHandler = async () => {
-    console.log('🔍 [NOTION] ========== Starting function ==========');
-    console.log('🔍 [NOTION] HTTP Method:', event.httpMethod);
-    console.log('🔍 [NOTION] Query params:', JSON.stringify(event.queryStringParameters || {}));
-    console.log('🔍 [NOTION] Headers:', JSON.stringify(event.headers || {}));
+    // Logs detalhados só quando DEBUG_NOTION=true
+    dlog('🔍 [NOTION] ========== Starting function ==========');
+    dlog('🔍 [NOTION] HTTP Method:', event.httpMethod);
+    dlog('🔍 [NOTION] Query params:', JSON.stringify(event.queryStringParameters || {}));
     
     if (event.httpMethod === 'OPTIONS') {
-      console.log('🔍 [NOTION] OPTIONS request - returning CORS headers');
+      dlog('🔍 [NOTION] OPTIONS request - returning CORS headers');
       return { statusCode: 200, headers: CORS_HEADERS, body: '' };
     }
 
@@ -313,52 +449,22 @@ exports.handler = async (event, context) => {
       console.error('❌ [NOTION] @notionhq/client não está disponível');
       throw new Error('@notionhq/client não está disponível. Verifique as dependências.');
     }
-    console.log('✅ [NOTION] @notionhq/client disponível');
+    dlog('✅ [NOTION] @notionhq/client disponível');
 
     try {
-      console.log('🔍 [NOTION] Building Notion client...');
+      dlog('🔍 [NOTION] Building Notion client...');
       const notionCtx = buildNotionClient();
-      console.log('✅ [NOTION] Client built successfully');
-      console.log('🔍 [NOTION] Database ID:', notionCtx.databaseId ? `${notionCtx.databaseId.substring(0, 8)}...` : 'NOT SET');
-      console.log('🔍 [NOTION] Database ID full length:', notionCtx.databaseId ? notionCtx.databaseId.length : 0);
-      console.log('🔍 [NOTION] Token exists:', !!notionCtx.token);
-      console.log('🔍 [NOTION] Client available:', !!notionCtx.client);
-      
-      // ✅ TESTAR ACESSO AO BANCO ANTES DE FAZER QUERIES
-      if (notionCtx.client && notionCtx.databaseId) {
-        console.log('🔍 [NOTION] Testing database access...');
-        try {
-          const dbInfo = await notionCtx.client.databases.retrieve({
-            database_id: notionCtx.databaseId
-          });
-          console.log('✅ [NOTION] Database exists and is accessible');
-          console.log('📊 [NOTION] Database title:', dbInfo.title?.[0]?.plain_text || 'No title');
-          console.log('📊 [NOTION] Database ID verified:', dbInfo.id.substring(0, 8) + '...');
-        } catch (retrieveError) {
-          console.error('❌ [NOTION] Database retrieve failed:', retrieveError.message);
-          console.error('❌ [NOTION] Error code:', retrieveError.code);
-          console.error('❌ [NOTION] Error status:', retrieveError.status);
-          console.error('❌ [NOTION] Error body:', retrieveError.body);
-          
-          return {
-            statusCode: 400,
-            headers: CORS_HEADERS,
-            body: JSON.stringify({
-              success: false,
-              error: `Database not accessible: ${retrieveError.message}`,
-              code: retrieveError.code || 'DATABASE_ACCESS_ERROR',
-              databaseId: notionCtx.databaseId.substring(0, 8) + '...',
-              details: retrieveError.body || 'No additional details',
-              suggestion: 'Verify that: 1) Database ID is correct, 2) Integration has access to the database, 3) Database is shared with your integration'
-            })
-          };
-        }
-      }
+      dlog('✅ [NOTION] Client built successfully');
       
       const params = event.queryStringParameters || {};
       const route = params.route || 'orders';
-      console.log('🔍 [NOTION] Route:', route);
-      let databaseId = params.dbName ? null : notionCtx.databaseId;
+      dlog('🔍 [NOTION] Route:', route);
+      // ✅ Permitir `dbId` explícito via query (sem depender de env)
+      const dbIdParam = params.dbId || params.databaseId || null;
+      let databaseId = dbIdParam ? sanitizeDatabaseId(dbIdParam) : (params.dbName ? null : notionCtx.databaseId);
+      if (dbIdParam && !databaseId) {
+        throw new Error('dbId fornecido é inválido (formato incorreto).');
+      }
 
       // opcional: permitir busca por nome via dbName
       if (params.dbName) {
@@ -369,7 +475,7 @@ exports.handler = async (event, context) => {
                 method: 'POST',
                 headers: {
                   'Authorization': `Bearer ${notionCtx.token}`,
-                  'Notion-Version': '2025-09-03',
+                  'Notion-Version': NOTION_API_VERSION,
                   'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({ query: params.dbName, filter: { property: 'object', value: 'database' } })
@@ -386,12 +492,54 @@ exports.handler = async (event, context) => {
           throw new Error('Database não encontrado ou ID inválido');
         }
       }
+      
+      // ✅ Se após todos os fallbacks não temos databaseId, falhar com mensagem clara
+      if (!databaseId) {
+        const err = new Error('NOTION_DATABASE_ID não configurado e nenhum dbId foi fornecido.');
+        err.code = 'NO_DB_ID';
+        throw err;
+      }
 
       if (route === 'health') {
         return {
           statusCode: 200,
           headers: CORS_HEADERS,
           body: JSON.stringify({ status: 'ok', service: 'notion-api', timestamp: new Date().toISOString(), database: databaseId ? 'configured' : 'not-configured' })
+        };
+      }
+
+      // ✅ Retorna lista de data sources (necessário para paginação no frontend)
+      if (route === 'orders-sources') {
+        const dbId = databaseId || notionCtx.databaseId;
+        const sources = await getAllDataSources(notionCtx.token, dbId);
+        return {
+          statusCode: 200,
+          headers: CORS_HEADERS,
+          body: JSON.stringify({
+            success: true,
+            databaseId: dbId,
+            sources
+          })
+        };
+      }
+
+      // ✅ Paginação: retorna UMA página já normalizada (evita timeout de 30s)
+      if (route === 'orders-page') {
+        const dbId = databaseId || notionCtx.databaseId;
+        const sourceId = params.sourceId;
+        const cursor = params.cursor || null;
+        const pageSize = params.pageSize ? Math.min(100, Math.max(1, parseInt(params.pageSize, 10))) : 100;
+        const page = await fetchOrdersPage(notionCtx, dbId, sourceId, cursor, pageSize);
+        return {
+          statusCode: 200,
+          headers: CORS_HEADERS,
+          body: JSON.stringify({
+            success: true,
+            sourceId,
+            cursor,
+            pageSize,
+            ...page
+          })
         };
       }
 
@@ -402,7 +550,6 @@ exports.handler = async (event, context) => {
 
       if (route === 'orders' || route === 'orders-debug') {
         console.log('🔍 [NOTION] Fetching data from database...');
-        console.log('🔍 [NOTION] Using database ID:', databaseId || notionCtx.databaseId);
         
         const results = await fetchNotionData(notionCtx, databaseId || notionCtx.databaseId);
         console.log('✅ [NOTION] Raw results fetched:', {
@@ -421,15 +568,7 @@ exports.handler = async (event, context) => {
         const orders = results.map((page, index) => {
           try {
             const order = rowToOrder(page);
-            if (index < 3) {
-              console.log(`🔍 [NOTION] Processed order ${index + 1}:`, {
-                id: order.id,
-                cliente: order.cliente1 || order.cliente,
-                tipoDemanda: order.tipoDemanda,
-                dataEntrega: order.dataEntrega,
-                status: order.status
-              });
-            }
+            // Evitar logs muito verbosos (pode causar timeout)
             return order;
           } catch (err) {
             console.error(`❌ [NOTION] Error processing page ${index} (${page.id}):`, err.message);
@@ -457,7 +596,7 @@ exports.handler = async (event, context) => {
         
         console.log('🔍 [NOTION] Extracting content types...');
         const contentTypes = extractUniqueContentTypes(orders);
-        console.log('✅ [NOTION] Content types:', contentTypes);
+        dlog('✅ [NOTION] Content types:', contentTypes);
 
         console.log('🔍 [NOTION] Building final payload...');
         const payload = {
@@ -488,7 +627,7 @@ exports.handler = async (event, context) => {
           visaoGeral_count: payload.visaoGeral.length,
           contentTypes_count: payload.contentTypes.length
         });
-        console.log('🔍 [NOTION] ========== Function completed successfully ==========');
+        dlog('🔍 [NOTION] ========== Function completed successfully ==========');
 
         return { statusCode: 200, headers: CORS_HEADERS, body: JSON.stringify(payload) };
       }
@@ -530,7 +669,7 @@ exports.handler = async (event, context) => {
           details: error.body || 'No additional details',
           debug: {
             timestamp: new Date().toISOString(),
-            api_version: '2025-09-03'
+            api_version: '2025-09-03 (required for multi-source databases)'
           }
         })
       };

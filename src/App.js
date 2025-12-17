@@ -25,108 +25,20 @@ import InteractiveHeatmap from './components/InteractiveHeatmap';
 import DrillDownModal from './components/DrillDownModal';
 import EventTimeline from './components/EventTimeline';
 import NavigationManager from './components/NavigationManager';
-import AIInsightsPanel from './components/AIInsightsPanel';
 import AnalystsCalendar from './components/AnalystsCalendar';
 
 // Hooks e serviços - 🔧 IMPORT CORRIGIDO
 import { default as useDashboardData } from './hooks/useDashboardData';
 import { DataProcessingService, extractDynamicKPIMetrics } from './services/dataProcessingService'; // 👈 CORRIGIDO: named import
 import { dataStandardizer } from './utils/dataStandardization.js';
-import { useProductionData } from './services/mockData';
 
-// Componente de Debug para desenvolvimento
-const DebugPanel = ({ data }) => {
-  const [forceProduction, setForceProduction] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('force-production') === 'true';
-    }
-    return false;
-  });
-  const isProduction = useProductionData();
-  
-  const toggleMode = () => {
-    const newMode = !forceProduction;
-    setForceProduction(newMode);
-    
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('force-production', newMode.toString());
-      // Também atualizar query string para compatibilidade
-      const url = new URL(window.location);
-      if (newMode) {
-        url.searchParams.set('force-production', 'true');
-      } else {
-        url.searchParams.delete('force-production');
-      }
-      window.history.replaceState({}, '', url);
-      window.location.reload();
-    }
-  };
-  
-  if (process.env.NODE_ENV !== 'development') return null;
-  
-  const recordCount = data?.originalOrders?.length || 0;
-  const expectedCount = 1616;
-  const isMockData = recordCount === 50;
-  
-  return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      right: 0,
-      background: isProduction ? '#4CAF50' : '#f44336',
-      color: 'white',
-      padding: '10px 15px',
-      zIndex: 9999,
-      fontSize: '12px',
-      borderRadius: '0 0 0 8px',
-      boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
-      fontFamily: 'monospace',
-      minWidth: '200px'
-    }}>
-      <div style={{ fontWeight: 'bold', marginBottom: '8px', fontSize: '13px' }}>
-        🔧 DEBUG PANEL
-      </div>
-      <button
-        onClick={toggleMode}
-        style={{
-          color: 'white',
-          background: 'rgba(255,255,255,0.2)',
-          border: '1px solid white',
-          padding: '6px 10px',
-          borderRadius: '4px',
-          cursor: 'pointer',
-          width: '100%',
-          marginBottom: '8px',
-          fontWeight: 'bold'
-        }}
-      >
-        {isProduction ? '🌐 PRODUCTION' : '🔧 MOCK DATA'}
-      </button>
-      <div style={{ marginTop: '5px', fontSize: '11px', lineHeight: '1.4' }}>
-        <div>Mode: {isProduction ? '🌐 PRODUCTION' : '🔧 DEVELOPMENT'}</div>
-        <div>Port: {window.location.port || 'default'}</div>
-        <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px solid rgba(255,255,255,0.3)' }}>
-          Records: <strong>{recordCount}</strong>
-          {isMockData && <span style={{ color: '#ffeb3b' }}> (Mock)</span>}
-          {!isMockData && recordCount !== expectedCount && (
-            <span style={{ color: '#ffeb3b' }}> / {expectedCount}</span>
-          )}
-        </div>
-        {isProduction && recordCount === 0 && (
-          <div style={{ color: '#ffeb3b', marginTop: '4px', fontSize: '10px' }}>
-            ⚠️ No data loaded
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
 
 function App() {
   const [filters, setFilters] = useState({
     periodo: 'ambos',
     cliente: 'todos',
     tipo: 'geral',
+    mes: 'todos',
   });
 
   // Navegação entre views
@@ -142,7 +54,6 @@ function App() {
     value: null,
   });
   const [selectedEvent, setSelectedEvent] = useState(null);
-  const [insights, setInsights] = useState([]);
   
   // Paginação para tabela de tipos de demanda
   const [currentPage, setCurrentPage] = useState(1);
@@ -222,12 +133,8 @@ function App() {
         notionData.originalOrders // ← APENAS NOTION
       );
       
-      // ✅ Verificar se todos os registros foram processados
-      if (consolidatedData.length === 1616) {
-        console.log('🎉 [SUCESSO] Todos os 1616 registros carregados!');
-      } else {
-        console.warn(`⚠️ [VERIFICAÇÃO] Esperado: 1616, Carregado: ${consolidatedData.length}`);
-      }
+      // ✅ Log informativo (sem valor "esperado" hardcoded)
+      console.log(`📦 [NOTION ONLY] Registros processados: ${consolidatedData.length}`);
       
       // ✅ Processar dados consolidados
       setNotionOnlyData({
@@ -283,6 +190,26 @@ function App() {
 
   // 🆕 Usar dados com clientes consolidados se disponível, senão usar data normal
   const dataParaFiltrar = dadosComClientesConsolidados || data;
+
+  // Labels de mês (compatível com DataProcessingService.MONTH_KEYS)
+  const monthLabels = React.useMemo(
+    () => ({
+      janeiro: 'Janeiro',
+      fevereiro: 'Fevereiro',
+      marco: 'Março',
+      abril: 'Abril',
+      maio: 'Maio',
+      junho: 'Junho',
+      julho: 'Julho',
+      agosto: 'Agosto',
+      setembro: 'Setembro',
+      outubro: 'Outubro',
+      novembro: 'Novembro',
+      dezembro: 'Dezembro',
+    }),
+    []
+  );
+  const selectedMonthLabel = filters.mes !== 'todos' ? (monthLabels[filters.mes] || filters.mes) : null;
   
   const filteredData = React.useMemo(() => {
     if (!dataParaFiltrar) return null;
@@ -329,6 +256,14 @@ function App() {
       integrityCheck: integrityCheck
     };
   }, [filteredData, filters]);
+
+  const monthlyGrowth = React.useMemo(() => {
+    if (filters.periodo !== 'ambos' || filters.mes === 'todos') return null;
+    const a = metrics?.totalDemandas2024 || 0;
+    const b = metrics?.totalDemandas2025 || 0;
+    if (a > 0) return Math.round(((b - a) / a) * 100);
+    return b > 0 ? 100 : 0;
+  }, [filters.periodo, filters.mes, metrics]);
 
   // 🆕 KPI Dinâmico - Atualiza em tempo real baseado nos dados consolidados
   const dynamicKpiMetrics = React.useMemo(() => {
@@ -424,10 +359,6 @@ function App() {
         { label: 'Dashboard', onClick: () => handleViewChange('dashboard') },
         { label: 'Timeline de Eventos' },
       ],
-      insights: [
-        { label: 'Dashboard', onClick: () => handleViewChange('dashboard') },
-        { label: 'Insights com IA' },
-      ],
       analysts: [
         { label: 'Dashboard', onClick: () => handleViewChange('dashboard') },
         // { label: 'Calendário dos Analistas' },
@@ -447,12 +378,6 @@ function App() {
 
   const handleEventClick = (event) => {
     setSelectedEvent(event);
-  };
-
-  const handleInsightClick = (insight) => {
-    if (insight?.category === 'performance' && insight.metrics?.client) {
-      handleDrillDown(insight.metrics.client, null, null);
-    }
   };
 
   const handleRefresh = async () => {
@@ -478,7 +403,7 @@ function App() {
   };
 
   const clearAllFilters = () => {
-    setFilters({ periodo: 'ambos', cliente: 'todos', tipo: 'geral' });
+    setFilters({ periodo: 'ambos', cliente: 'todos', tipo: 'geral', mes: 'todos' });
   };
 
   // Funções de paginação
@@ -513,10 +438,6 @@ function App() {
           { label: 'Dashboard', onClick: () => handleViewChange('dashboard') },
           { label: 'Timeline de Eventos' },
         ],
-        insights: [
-          { label: 'Dashboard', onClick: () => handleViewChange('dashboard') },
-          { label: 'Insights com IA' },
-        ],
         analysts: [
           { label: 'Dashboard', onClick: () => handleViewChange('dashboard') },
           // { label: 'Calendário dos Analistas' },
@@ -541,8 +462,9 @@ function App() {
           <>
             <KPICard
               title="Clientes atendidos"
-              value={filteredData?.visaoGeral?.length || 0}
-              subtitle="Com base nos filtros atuais"
+              // 🔧 Alinhar com "Clientes Únicos Disponíveis" do Ranking Comparativo:
+              // mesma fonte + mesma lógica de unicidade/exclusões (DataProcessingService.getUniqueClients)
+              value={uniqueClients?.length || 0}
               gradient="linear-gradient(135deg, #0EA5A4 0%, #14B8A6 100%)"
               delay="100ms"
             />
@@ -558,25 +480,33 @@ function App() {
             */}
             
             <KPICard
-              title="Média mensal 24"
-              value={metrics.mediaMensal2024 || 0}
-              subtitle={`${metrics.totalDemandas2024 || 0} demandas terminadas em 2024 ÷ 12`}
+              title={filters.mes !== 'todos' ? `Demandas ${selectedMonthLabel} 24` : 'Média mensal 24'}
+              value={filters.mes !== 'todos' ? (metrics.totalDemandas2024 || 0) : (metrics.mediaMensal2024 || 0)}
+              subtitle={
+                filters.mes !== 'todos'
+                  ? `${metrics.totalDemandas2024 || 0} demandas terminadas em ${selectedMonthLabel}/2024`
+                  : `${metrics.totalDemandas2024 || 0} demandas terminadas em 2024 ÷ 12`
+              }
               gradient="linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)"
               delay="300ms"
             />
             
             <KPICard
-              title="Média mensal 25"
-              value={metrics.mediaMensal2025 || 0}
-              subtitle={`${metrics.totalDemandas2025 || 0} demandas em 2025 ÷ ${metrics.mesesDecorridos2025 || new Date().getMonth() + 1} meses`}
+              title={filters.mes !== 'todos' ? `Demandas ${selectedMonthLabel} 25` : 'Média mensal 25'}
+              value={filters.mes !== 'todos' ? (metrics.totalDemandas2025 || 0) : (metrics.mediaMensal2025 || 0)}
+              subtitle={
+                filters.mes !== 'todos'
+                  ? `${metrics.totalDemandas2025 || 0} demandas terminadas em ${selectedMonthLabel}/2025`
+                  : `${metrics.totalDemandas2025 || 0} demandas em 2025 ÷ ${metrics.mesesDecorridos2025 || new Date().getMonth() + 1} meses`
+              }
               gradient="linear-gradient(135deg, #F97316 0%, #FB923C 100%)"
               delay="400ms"
             />
             
             <KPICard
-              title="Crescimento 2025"
-              value={`${(metrics.crescimento || 0) > 0 ? '+' : ''}${metrics.crescimento || 0}%`}
-              subtitle={`Relação de crescimento entre os anos`}
+              title={filters.mes !== 'todos' ? 'Crescimento (mês)' : 'Crescimento 2025'}
+              value={`${(filters.mes !== 'todos' ? (monthlyGrowth || 0) : (metrics.crescimento || 0)) > 0 ? '+' : ''}${filters.mes !== 'todos' ? (monthlyGrowth || 0) : (metrics.crescimento || 0)}%`}
+              subtitle={filters.mes !== 'todos' ? 'Comparação do mês selecionado: 2024 vs 2025' : 'Relação de crescimento entre os anos'}
               gradient="linear-gradient(135deg, #0EA5A4 0%, #14B8A6 100%)"
               delay="500ms"
             />
@@ -975,14 +905,14 @@ function App() {
       {/* Gráfico de Produção de Design */}
       <div className="charts-row modern">
         <div className="chart-col-full">
-          <DesignProductionChart data={data} title="🎨 Produção de Design" filters={filters} />
+          <DesignProductionChart data={filteredData || data} title="🎨 Produção de Design" filters={filters} />
         </div>
       </div>
 
       {/* Seção de Revisão - Anna Oliveira */}
       <div className="charts-row modern">
         <div className="chart-col-full">
-          <ReviewProductionChart data={data} title="Produção de Revisão" filters={filters} />
+          <ReviewProductionChart data={filteredData || data} title="Produção de Revisão" filters={filters} />
         </div>
       </div>
 
@@ -1009,13 +939,15 @@ function App() {
       case 'timeline':
         return <EventTimeline data={filteredData} onEventClick={handleEventClick} title="📅 Timeline de Eventos e Marcos" />;
 
-      case 'insights':
-        return <AIInsightsPanel data={filteredData} onInsightClick={handleInsightClick} autoUpdate={true} />;
       case 'collaborators':
         return (
           <div className="charts-row modern">
             <div className="chart-col-full">
-              <CollaboratorDemands data={filteredData} title="📅 Demandas por Colaborador" />
+              <CollaboratorDemands
+                data={filteredData}
+                title="📅 Demandas por Colaborador"
+                databaseId="37f13b4723764d5db4ec94b259430b7c"
+              />
             </div>
           </div>
         );
@@ -1038,7 +970,6 @@ function App() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
             <InteractiveHeatmap data={filteredData?.originalOrders || []} onCellClick={handleDrillDown} title="🗺️ Mapa de Calor - Clientes x Meses" />
             <EventTimeline data={filteredData} onEventClick={handleEventClick} title="📅 Linha do Tempo de Eventos" />
-            <AIInsightsPanel data={filteredData} onInsightClick={handleInsightClick} autoUpdate={false} />
           </div>
         );
 
@@ -1052,8 +983,6 @@ function App() {
   // ==========================================
   return (
     <div className="dashboard-producao modern">
-      {/* Debug Panel (apenas em desenvolvimento) */}
-      <DebugPanel data={data} />
       
       {/* Header com navegação aprimorada */}
       <div className="dashboard-header modern">
@@ -1075,7 +1004,7 @@ function App() {
         <div className="last-update">
           Última atualização{' '}
           {lastUpdate ? new Date(lastUpdate).toLocaleString('pt-BR') : '—'} •
-          {' '}Fonte: Google Sheets + Notion (Consolidado) • Auto-refresh ativo
+          {' '}Fonte: {data?.sheetName === 'notion' ? 'Notion' : 'Notion + Sheets'} • Auto-refresh ativo
           {error ? ` • Erro: ${error}` : ''}
         </div>
       </div>
@@ -1109,7 +1038,7 @@ function App() {
                 <span className="logo-pacto">Pacto</span>
               </div>
               <span className="filter-main-label">Filtros Inteligentes</span>
-              {(filters.cliente !== 'todos' || filters.tipo !== 'geral' || filters.periodo !== 'ambos') && (
+              {(filters.cliente !== 'todos' || filters.tipo !== 'geral' || filters.periodo !== 'ambos' || filters.mes !== 'todos') && (
                 <button
                   onClick={clearAllFilters}
                   style={{
@@ -1138,6 +1067,29 @@ function App() {
                   <option value="ambos">📊 Comparativo 2024 vs 2025 (12 meses)</option>
                   <option value="2024">📅 Apenas 2024 (Histórico)</option>
                   <option value="2025">📅 Apenas 2025 (Atual)</option>
+                </select>
+              </div>
+
+              {/* 🆕 Filtro por Mês */}
+              <div className="filter-group-labeled">
+                <label className="filter-label-title">
+                  <span className="filter-icon">🗓️</span>
+                  Mês
+                </label>
+                <select value={filters.mes} onChange={(e) => handleFilterChange('mes', e.target.value)} className="filter-select modern">
+                  <option value="todos">📅 Todos os meses</option>
+                  <option value="janeiro">Janeiro</option>
+                  <option value="fevereiro">Fevereiro</option>
+                  <option value="marco">Março</option>
+                  <option value="abril">Abril</option>
+                  <option value="maio">Maio</option>
+                  <option value="junho">Junho</option>
+                  <option value="julho">Julho</option>
+                  <option value="agosto">Agosto</option>
+                  <option value="setembro">Setembro</option>
+                  <option value="outubro">Outubro</option>
+                  <option value="novembro">Novembro</option>
+                  <option value="dezembro">Dezembro</option>
                 </select>
               </div>
 
@@ -1202,7 +1154,7 @@ function App() {
         onClose={() => setDrillDownData({ isOpen: false, client: null, month: null, value: null })}
         client={drillDownData.client}
         month={drillDownData.month}
-        data={data}
+        data={filteredData || data}
       />
 
       {/* Botões Flutuantes */}
@@ -1341,36 +1293,7 @@ function App() {
           <span role="img" aria-label="collaborators">👥</span>
         </button>
 
-        {/* Insights IA */}
-        <button
-          onClick={() => handleViewChange('insights')}
-          style={{
-            width: '56px',
-            height: '56px',
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, #8B5CF6, #A78BFA)',
-            color: 'white',
-            border: 'none',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 4px 12px rgba(139, 92, 246, 0.4)',
-            transition: 'all 0.2s ease',
-            fontSize: '1.5rem',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = 'scale(1.1)';
-            e.currentTarget.style.boxShadow = '0 6px 20px rgba(139, 92, 246, 0.6)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'scale(1)';
-            e.currentTarget.style.boxShadow = '0 4px 12px rgba(139, 92, 246, 0.4)';
-          }}
-          title="Insights com IA"
-        >
-          <span role="img" aria-label="robot">🤖</span>
-        </button>
+        {/* Removido: Insights com Inteligência Artificial */}
 
         {/* Voltar Dashboard */}
         <button

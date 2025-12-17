@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { 
-  BarChart3, Map, Calendar, Brain, Eye, Grid, Users,
+  BarChart3, Map, Calendar, Eye, Grid, Users,
   ArrowLeft, Settings, Bookmark, Share2, Download,
   Layers, Filter, Search, RefreshCw, Maximize2
 } from 'lucide-react';
@@ -58,14 +58,6 @@ const NavigationManager = ({
       color: '#22C55E',
       category: 'temporal'
     },
-    insights: {
-      id: 'insights',
-      title: 'Insights com IA',
-      description: 'Análises automáticas e recomendações inteligentes',
-      icon: Brain,
-      color: '#8B5CF6',
-      category: 'ai'
-    },
     analytics: {
       id: 'analytics',
       title: 'Analytics Avançado',
@@ -88,7 +80,6 @@ const NavigationManager = ({
     overview: { label: 'Visão Geral', icon: BarChart3, color: '#FF6B47' },
     analysis: { label: 'Análise', icon: Map, color: '#10B981' },
     temporal: { label: 'Temporal', icon: Calendar, color: '#3B82F6' },
-    ai: { label: 'Inteligência', icon: Brain, color: '#8B5CF6' },
     advanced: { label: 'Avançado', icon: Grid, color: '#F59E0B' },
     detail: { label: 'Detalhes', icon: Eye, color: '#EF4444' }
   };
@@ -555,7 +546,7 @@ const NavigationManager = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {/* Views rápidas */}
           <div style={{ display: 'flex', gap: '4px' }}>
-            {['dashboard','heatmap','timeline','insights'].map(id => {
+            {['dashboard','heatmap','timeline'].map(id => {
               const view = views[id];
               if (!view) return null;
               return (

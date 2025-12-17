@@ -5,24 +5,84 @@
 
 import React, { useState, useEffect } from 'react';
 import { 
-  X, TrendingUp, BarChart3, Brain, 
-  AlertCircle, CheckCircle, Lightbulb, Target,
-  Calendar, Users, FileText, Zap, Star, ArrowRight
+  X, BarChart3, PieChart as PieChartIcon, FileText
 } from 'lucide-react';
-import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { AnalyticsService } from '../services/analyticsService';
+import { BarChart, Bar, PieChart as RechartsPieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { DataProcessingService } from '../services/dataProcessingService';
 
 const DrillDownModal = ({ isOpen, onClose, client, month, data }) => {
   const [activeTab, setActiveTab] = useState('overview');
   const [drillData, setDrillData] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  const processDrillDownData = (payload, clientName, monthLabel) => {
+    const monthIndexMap = {
+      Jan: 0, Fev: 1, Mar: 2, Abr: 3, Mai: 4, Jun: 5,
+      Jul: 6, Ago: 7, Set: 8, Out: 9, Nov: 10, Dez: 11,
+    };
+
+    const orders = Array.isArray(payload?.originalOrders) ? payload.originalOrders : [];
+    const targetMonthIndex = monthLabel ? monthIndexMap[String(monthLabel).trim()] : null;
+
+    const filteredOrders = orders.filter((o) => {
+      const clients = DataProcessingService.extractCanonicalClientsFromOrder(o);
+      if (!clients || clients.length === 0) return false;
+      const matchesClient = clients.includes(clientName);
+      if (!matchesClient) return false;
+
+      if (targetMonthIndex == null) return true;
+      const dt = DataProcessingService.parseDeliveryDate(o);
+      if (!dt) return false;
+      return dt.getMonth() === targetMonthIndex;
+    });
+
+    const total = filteredOrders.length;
+    const typesMap = new Map(); // tipo -> count
+    filteredOrders.forEach((o) => {
+      const tipo = (o?.tipoDemanda || o?.TipoDemanda || o?.tipo_demanda || 'Sem tipo').toString().trim() || 'Sem tipo';
+      typesMap.set(tipo, (typesMap.get(tipo) || 0) + 1);
+    });
+
+    const types = Array.from(typesMap.keys()).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
+    const palette = ['#FF6B47', '#10B981', '#3B82F6', '#8B5CF6', '#F59E0B', '#EC4899', '#06B6D4', '#84CC16'];
+    const breakdown = Array.from(typesMap.entries())
+      .map(([type, value], idx) => {
+        const percentage = total > 0 ? Math.round((value / total) * 100) : 0;
+        return {
+          type,
+          value,
+          percentage,
+          color: palette[idx % palette.length],
+          icon: '📄',
+        };
+      })
+      .sort((a, b) => b.value - a.value);
+
+    const concluidos = filteredOrders.filter((o) => o?.isConcluido || o?.concluido === true || o?.concluida === 'YES').length;
+    const efficiency = total > 0 ? Math.round((concluidos / total) * 100) : 0;
+    const satisfaction = efficiency >= 85 ? 4.7 : efficiency >= 70 ? 4.3 : efficiency >= 50 ? 3.9 : 3.5;
+
+    return {
+      overview: {
+        total,
+        types,
+        satisfaction,
+        efficiency,
+      },
+      breakdown,
+      // Seção de IA removida
+      insights: [],
+      recommendations: [],
+    };
+  };
+
   useEffect(() => {
     if (isOpen && client && data) {
       setLoading(true);
       // Simular carregamento assíncrono
       setTimeout(() => {
-        const processedData = AnalyticsService.processDrillDownData(data, client, month);
+        const processedData = processDrillDownData(data, client, month);
         setDrillData(processedData);
         setLoading(false);
       }, 300);
@@ -33,9 +93,7 @@ const DrillDownModal = ({ isOpen, onClose, client, month, data }) => {
 
   const tabs = [
     { id: 'overview', label: 'Visão Geral', icon: BarChart3 },
-    { id: 'breakdown', label: 'Breakdown', icon: PieChart },
-    { id: 'insights', label: 'Insights IA', icon: Brain },
-    { id: 'recommendations', label: 'Recomendações', icon: Lightbulb }
+    { id: 'breakdown', label: 'Breakdown', icon: PieChartIcon },
   ];
 
   const renderOverview = () => {
@@ -196,7 +254,7 @@ const DrillDownModal = ({ isOpen, onClose, client, month, data }) => {
             padding: '20px'
           }}>
             <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
+              <RechartsPieChart>
                 <Pie
                   data={drillData.breakdown}
                   cx="50%"
@@ -212,7 +270,7 @@ const DrillDownModal = ({ isOpen, onClose, client, month, data }) => {
                   ))}
                 </Pie>
                 <Tooltip />
-              </PieChart>
+              </RechartsPieChart>
             </ResponsiveContainer>
           </div>
         </div>
@@ -301,385 +359,6 @@ const DrillDownModal = ({ isOpen, onClose, client, month, data }) => {
                 </div>
               </div>
             ))}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderInsights = () => {
-    if (!drillData || !drillData.insights.length) {
-      return (
-        <div style={{ textAlign: 'center', padding: '40px', color: '#6B7280' }}>
-          <Brain size={48} style={{ margin: '0 auto 16px', opacity: 0.5 }} />
-          <div>Analisando dados para gerar insights...</div>
-          <div style={{ fontSize: '0.875rem', marginTop: '8px' }}>
-            A IA precisa de mais dados para análise aprofundada
-          </div>
-        </div>
-      );
-    }
-
-    const getInsightIcon = (type) => {
-      switch (type) {
-        case 'positive': return { icon: CheckCircle, color: '#10B981' };
-        case 'attention': return { icon: AlertCircle, color: '#F59E0B' };
-        case 'opportunity': return { icon: Target, color: '#3B82F6' };
-        case 'pattern': return { icon: TrendingUp, color: '#8B5CF6' };
-        default: return { icon: Lightbulb, color: '#6B7280' };
-      }
-    };
-
-    return (
-      <div className="drill-insights">
-        <div style={{
-          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-          color: 'white',
-          padding: '20px',
-          borderRadius: '12px',
-          marginBottom: '24px',
-          textAlign: 'center'
-        }}>
-          <Brain size={32} style={{ marginBottom: '12px' }} />
-          <h4 style={{ margin: '0 0 8px 0', fontSize: '1.25rem', fontWeight: '700' }}>
-            🤖 Análise Inteligente Automatizada
-          </h4>
-          <p style={{ margin: '0', fontSize: '0.875rem', opacity: '0.9' }}>
-            Insights gerados por IA baseados em padrões e tendências dos dados
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {drillData.insights.map((insight, index) => {
-            const { icon: IconComponent, color } = getInsightIcon(insight.type);
-            
-            return (
-              <div
-                key={index}
-                style={{
-                  background: 'white',
-                  border: `2px solid ${color}20`,
-                  borderRadius: '12px',
-                  padding: '20px',
-                  position: 'relative',
-                  overflow: 'hidden'
-                }}
-              >
-                {/* Barra colorida lateral */}
-                <div style={{
-                  position: 'absolute',
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
-                  width: '4px',
-                  background: color
-                }} />
-
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
-                  <div style={{
-                    background: `${color}20`,
-                    color: color,
-                    padding: '12px',
-                    borderRadius: '12px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}>
-                    <IconComponent size={24} />
-                  </div>
-
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                      <h5 style={{
-                        margin: 0,
-                        color: '#374151',
-                        fontSize: '1.125rem',
-                        fontWeight: '600'
-                      }}>
-                        {insight.icon} {insight.title}
-                      </h5>
-                      
-                      <div style={{
-                        background: `${color}20`,
-                        color: color,
-                        padding: '2px 8px',
-                        borderRadius: '12px',
-                        fontSize: '0.75rem',
-                        fontWeight: '600',
-                        textTransform: 'uppercase'
-                      }}>
-                        {insight.confidence} confiança
-                      </div>
-                    </div>
-
-                    <p style={{
-                      margin: '0 0 12px 0',
-                      color: '#6B7280',
-                      lineHeight: '1.6',
-                      fontSize: '0.95rem'
-                    }}>
-                      {insight.description}
-                    </p>
-
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      fontSize: '0.875rem'
-                    }}>
-                      <span style={{ color: '#9CA3AF' }}>Impacto:</span>
-                      <span style={{
-                        color: insight.impact === 'positivo' ? '#10B981' : 
-                              insight.impact === 'negativo' ? '#EF4444' : '#6B7280',
-                        fontWeight: '600'
-                      }}>
-                        {insight.impact === 'positivo' ? '📈 Positivo' : 
-                         insight.impact === 'negativo' ? '📉 Negativo' : '➡️ Neutro'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Resumo dos Insights */}
-        <div style={{
-          marginTop: '24px',
-          background: '#F8FAFC',
-          border: '1px solid #E2E8F0',
-          borderRadius: '12px',
-          padding: '20px'
-        }}>
-          <h5 style={{ 
-            color: '#374151', 
-            margin: '0 0 12px 0',
-            fontSize: '1rem',
-            fontWeight: '600'
-          }}>
-            🎯 Resumo da Análise IA
-          </h5>
-          
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
-            gap: '12px',
-            fontSize: '0.875rem'
-          }}>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#10B981' }}>
-                {drillData.insights.filter(i => i.impact === 'positivo').length}
-              </div>
-              <div style={{ color: '#6B7280' }}>Pontos Positivos</div>
-            </div>
-            
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#F59E0B' }}>
-                {drillData.insights.filter(i => i.impact === 'negativo').length}
-              </div>
-              <div style={{ color: '#6B7280' }}>Atenções</div>
-            </div>
-            
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#3B82F6' }}>
-                {drillData.insights.filter(i => i.confidence === 'alta').length}
-              </div>
-              <div style={{ color: '#6B7280' }}>Alta Confiança</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderRecommendations = () => {
-    if (!drillData || !drillData.recommendations.length) {
-      return (
-        <div style={{ textAlign: 'center', padding: '40px', color: '#6B7280' }}>
-          <Lightbulb size={48} style={{ margin: '0 auto 16px', opacity: 0.5 }} />
-          <div>Nenhuma recomendação específica no momento</div>
-          <div style={{ fontSize: '0.875rem', marginTop: '8px' }}>
-            Continue monitorando para receber sugestões personalizadas
-          </div>
-        </div>
-      );
-    }
-
-    const getPriorityColor = (priority) => {
-      switch (priority) {
-        case 'alta': return '#EF4444';
-        case 'média': return '#F59E0B';
-        case 'baixa': return '#10B981';
-        default: return '#6B7280';
-      }
-    };
-
-    const getCategoryIcon = (category) => {
-      switch (category) {
-        case 'retenção': return '🚨';
-        case 'expansão': return '🚀';
-        case 'diversificação': return '🎯';
-        case 'otimização': return '⚡';
-        default: return '💡';
-      }
-    };
-
-    return (
-      <div className="drill-recommendations">
-        <div style={{
-          background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-          color: 'white',
-          padding: '20px',
-          borderRadius: '12px',
-          marginBottom: '24px',
-          textAlign: 'center'
-        }}>
-          <Lightbulb size={32} style={{ marginBottom: '12px' }} />
-          <h4 style={{ margin: '0 0 8px 0', fontSize: '1.25rem', fontWeight: '700' }}>
-            💡 Recomendações Estratégicas
-          </h4>
-          <p style={{ margin: '0', fontSize: '0.875rem', opacity: '0.9' }}>
-            Ações sugeridas baseadas na análise de dados e padrões identificados
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          {drillData.recommendations.map((rec, index) => (
-            <div
-              key={index}
-              style={{
-                background: 'white',
-                border: `2px solid ${getPriorityColor(rec.priority)}20`,
-                borderRadius: '12px',
-                padding: '20px',
-                position: 'relative'
-              }}
-            >
-              {/* Indicador de Prioridade */}
-              <div style={{
-                position: 'absolute',
-                top: '12px',
-                right: '12px',
-                background: getPriorityColor(rec.priority),
-                color: 'white',
-                padding: '4px 12px',
-                borderRadius: '20px',
-                fontSize: '0.75rem',
-                fontWeight: '600',
-                textTransform: 'uppercase'
-              }}>
-                {rec.priority} prioridade
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
-                <div style={{
-                  fontSize: '2rem',
-                  background: `${getPriorityColor(rec.priority)}20`,
-                  padding: '12px',
-                  borderRadius: '12px',
-                  lineHeight: 1
-                }}>
-                  {getCategoryIcon(rec.category)}
-                </div>
-
-                <div style={{ flex: 1, paddingRight: '60px' }}>
-                  <h5 style={{
-                    margin: '0 0 8px 0',
-                    color: '#374151',
-                    fontSize: '1.125rem',
-                    fontWeight: '600'
-                  }}>
-                    {rec.icon} {rec.title}
-                  </h5>
-
-                  <p style={{
-                    margin: '0 0 16px 0',
-                    color: '#6B7280',
-                    lineHeight: '1.6'
-                  }}>
-                    {rec.description}
-                  </p>
-
-                  {/* Lista de Ações */}
-                  <div>
-                    <div style={{
-                      fontSize: '0.875rem',
-                      fontWeight: '600',
-                      color: '#374151',
-                      marginBottom: '8px'
-                    }}>
-                      📋 Ações Sugeridas:
-                    </div>
-                    
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      {rec.actions.map((action, actionIndex) => (
-                        <div
-                          key={actionIndex}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            fontSize: '0.875rem',
-                            color: '#6B7280'
-                          }}
-                        >
-                          <ArrowRight size={14} style={{ color: getPriorityColor(rec.priority) }} />
-                          {action}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Resumo das Recomendações */}
-        <div style={{
-          marginTop: '24px',
-          background: '#F8FAFC',
-          border: '1px solid #E2E8F0',
-          borderRadius: '12px',
-          padding: '20px'
-        }}>
-          <h5 style={{ 
-            color: '#374151', 
-            margin: '0 0 12px 0',
-            fontSize: '1rem',
-            fontWeight: '600'
-          }}>
-            📊 Distribuição de Prioridades
-          </h5>
-          
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))',
-            gap: '12px',
-            fontSize: '0.875rem'
-          }}>
-            {['alta', 'média', 'baixa'].map(priority => (
-              <div key={priority} style={{ textAlign: 'center' }}>
-                <div style={{ 
-                  fontSize: '1.5rem', 
-                  fontWeight: '700', 
-                  color: getPriorityColor(priority) 
-                }}>
-                  {drillData.recommendations.filter(r => r.priority === priority).length}
-                </div>
-                <div style={{ color: '#6B7280', textTransform: 'capitalize' }}>
-                  {priority} Prioridade
-                </div>
-              </div>
-            ))}
-            
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#6B7280' }}>
-                {drillData.recommendations.reduce((sum, r) => sum + r.actions.length, 0)}
-              </div>
-              <div style={{ color: '#6B7280' }}>Total de Ações</div>
-            </div>
           </div>
         </div>
       </div>
@@ -826,8 +505,6 @@ const DrillDownModal = ({ isOpen, onClose, client, month, data }) => {
             <>
               {activeTab === 'overview' && renderOverview()}
               {activeTab === 'breakdown' && renderBreakdown()}
-              {activeTab === 'insights' && renderInsights()}
-              {activeTab === 'recommendations' && renderRecommendations()}
             </>
           )}
         </div>
@@ -842,7 +519,7 @@ const DrillDownModal = ({ isOpen, onClose, client, month, data }) => {
           color: '#6B7280',
           textAlign: 'center'
         }}>
-          🤖 Análise gerada por IA • Dados processados em tempo real • 
+          Dados processados em tempo real • 
           {new Date().toLocaleString('pt-BR')}
         </div>
       </div>

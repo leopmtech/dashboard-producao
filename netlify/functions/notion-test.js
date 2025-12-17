@@ -23,16 +23,17 @@ exports.handler = async (event, context) => {
     // Test 0: Check environment variables
     console.log('🔍 [TEST] Checking environment variables...');
     
-    if (!process.env.NOTION_TOKEN) {
-      console.error('❌ [TEST] NOTION_TOKEN not found');
+    const notionToken = (process.env.NOTION_TOKEN || process.env.NOTION_API_KEY || '').trim();
+    if (!notionToken) {
+      console.error('❌ [TEST] NOTION_TOKEN/NOTION_API_KEY not found');
       return {
         statusCode: 500,
         headers: { 'Access-Control-Allow-Origin': '*' },
         body: JSON.stringify({
           success: false,
           step: 'env_check',
-          error: 'NOTION_TOKEN not found',
-          suggestion: 'Add NOTION_TOKEN to Netlify environment variables'
+          error: 'NOTION_TOKEN/NOTION_API_KEY not found',
+          suggestion: 'Add NOTION_TOKEN (or NOTION_API_KEY) to Netlify environment variables'
         })
       };
     }
@@ -52,47 +53,37 @@ exports.handler = async (event, context) => {
     }
     
     console.log('✅ [TEST] Environment variables found');
-    console.log('🔍 [TEST] Token exists:', !!process.env.NOTION_TOKEN);
-    console.log('🔍 [TEST] Token length:', process.env.NOTION_TOKEN ? process.env.NOTION_TOKEN.length : 0);
+    console.log('🔍 [TEST] Token exists:', !!notionToken);
+    console.log('🔍 [TEST] Token length:', notionToken ? notionToken.length : 0);
     console.log('🔍 [TEST] Database ID exists:', !!process.env.NOTION_DATABASE_ID);
     console.log('🔍 [TEST] Database ID raw:', process.env.NOTION_DATABASE_ID.substring(0, 20) + '...');
     
     // Initialize Notion client
+    // ✅ IMPORTANTE: Database usa múltiplas fontes de dados, REQUER versão 2025-09-03
     console.log('🔑 [TEST] Initializing Notion client...');
     const notion = new Client({
-      auth: process.env.NOTION_TOKEN,
+      auth: notionToken,
       notionVersion: '2025-09-03'
     });
-    console.log('✅ [TEST] Notion client initialized');
+    console.log('✅ [TEST] Notion client initialized (using 2025-09-03 for multi-source databases)');
     
-    // Test 1: Get current user (tests token validity)
-    console.log('🔑 [TEST] Test 1: Validating token...');
-    try {
-      const user = await notion.users.me();
-      console.log('✅ [TEST] Token is valid');
-      console.log('📊 [TEST] User info:', {
-        id: user.id,
-        name: user.name || 'No name',
-        type: user.type
-      });
-    } catch (tokenError) {
-      console.error('❌ [TEST] Token validation failed:', tokenError.message);
-      console.error('❌ [TEST] Error code:', tokenError.code);
-      console.error('❌ [TEST] Error status:', tokenError.status);
-      
-      return {
-        statusCode: 401,
-        headers: { 'Access-Control-Allow-Origin': '*' },
-        body: JSON.stringify({
-          success: false,
-          step: 'token_validation',
-          error: `Invalid token: ${tokenError.message}`,
-          error_code: tokenError.code,
-          error_status: tokenError.status,
-          suggestion: 'Verify that NOTION_TOKEN is correct and not expired'
-        })
-      };
+    // Test 1: Validate token format (skip users.me() - internal integrations don't support it)
+    // Note: Internal integrations (tokens starting with ntn_ or secret_) cannot use users.me()
+    // The proper validation is done by attempting to access the database directly
+    console.log('🔑 [TEST] Test 1: Validating token format...');
+    const token = notionToken;
+    
+    if (!token.startsWith('ntn_') && !token.startsWith('secret_')) {
+      console.warn('⚠️ [TEST] Token does not start with expected prefixes (ntn_ or secret_)');
+      console.log('🔍 [TEST] Token starts with:', token.substring(0, 10) + '...');
+    } else {
+      console.log('✅ [TEST] Token format looks valid');
+      console.log('🔍 [TEST] Token prefix:', token.substring(0, 4));
+      console.log('🔍 [TEST] Token length:', token.length);
     }
+    
+    // Note: We will validate the token by attempting database access (Test 3)
+    console.log('ℹ️ [TEST] Token will be validated by database access test (internal integrations cannot use users.me())');
     
     // Test 2: Format and validate database ID
     console.log('🔍 [TEST] Test 2: Formatting database ID...');
@@ -190,8 +181,9 @@ exports.handler = async (event, context) => {
           message: 'All tests passed!',
           tests: {
             token: {
-              status: 'valid',
-              user_id: (await notion.users.me()).id
+              status: 'valid (validated via database access)',
+              format: token.startsWith('ntn_') ? 'internal_integration' : 'other',
+              length: token.length
             },
             database_id_format: {
               status: 'valid',
@@ -207,7 +199,7 @@ exports.handler = async (event, context) => {
               sample_properties: propertyNames
             }
           },
-          api_version: '2025-09-03'
+          api_version: '2025-09-03 (required for multi-source databases)'
         })
       };
       

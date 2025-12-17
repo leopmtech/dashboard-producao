@@ -1,5 +1,6 @@
 import React from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { DataProcessingService } from '../services/dataProcessingService';
 
 const DesignProductionChart = ({ data, title, subtitle, filters = { periodo: '2025' } }) => {
   
@@ -17,10 +18,9 @@ const DesignProductionChart = ({ data, title, subtitle, filters = { periodo: '20
     gridLines: '#F3F4F6'
   };
 
-  // 🎯 NOVA FUNÇÃO: Filtrar dados do Gustavo Oliveira
+  // 🎯 Filtrar demandas do Gustavo Oliveira (a partir de orders)
   const filterGustavoOliveiraData = (rawData) => {
     console.log('👨‍🎨 [GUSTAVO FILTER] Filtrando dados do Gustavo Oliveira...');
-    console.log('👨‍🎨 [GUSTAVO FILTER] Dados recebidos:', rawData);
     
     if (!rawData || !Array.isArray(rawData)) {
       console.log('👨‍🎨 [GUSTAVO FILTER] ⚠️ Dados inválidos ou não é array');
@@ -30,6 +30,7 @@ const DesignProductionChart = ({ data, title, subtitle, filters = { periodo: '20
     // Variações do nome para busca flexível
     const nomeVariacoes = [
       'gustavo oliveira',
+      // manter variação curta por compatibilidade com dados antigos, mas priorizar match completo
       'gustavo',
     ];
 
@@ -86,35 +87,61 @@ const DesignProductionChart = ({ data, title, subtitle, filters = { periodo: '20
     return dadosGustavo;
   };
 
+  // ✅ Reproduz o cálculo de “Clientes Únicos Disponíveis” (App.js):
+  // DataProcessingService.getUniqueClients({ originalOrders })
+  // Aqui aplicado apenas às demandas do Gustavo (e respeitando o período do filtro).
+  const clientesAtendidosCount = React.useMemo(() => {
+    try {
+      const baseOrders = Array.isArray(data?.originalOrders) ? data.originalOrders : (Array.isArray(data) ? data : []);
+      if (!baseOrders || baseOrders.length === 0) return 0;
+
+      const gustavoOrders = filterGustavoOliveiraData(baseOrders);
+
+      const periodo = filters?.periodo || '2025';
+      const byPeriod = gustavoOrders.filter(o => {
+        const v = o?.dataEntregaDate || o?.dataEntrega;
+        if (!v) return false; // sem data -> não entra em recortes por ano
+        const s = String(v);
+        const year = /^\d{4}-/.test(s) ? parseInt(s.slice(0, 4), 10) : new Date(v).getFullYear();
+        if (periodo === 'ambos') return year === 2024 || year === 2025;
+        if (periodo === '2024') return year === 2024;
+        if (periodo === '2025') return year === 2025;
+        return true;
+      });
+
+      return DataProcessingService.getUniqueClients({ originalOrders: byPeriod }).length || 0;
+    } catch (e) {
+      console.warn('⚠️ [GUSTAVO] Falha ao calcular clientes atendidos:', e?.message || e);
+      return 0;
+    }
+  }, [data, filters?.periodo]);
+
   // Função para processar dados de design (MODIFICADA PARA GUSTAVO)
   const processDesignData = (rawData) => {
-    console.log('🎨 Processando dados de design - dados recebidos:', rawData);
+    console.log('🎨 Processando produção do Gustavo - fonte:', {
+      hasOriginalOrders: !!rawData?.originalOrders,
+      originalOrdersCount: rawData?.originalOrders?.length || 0,
+      hasDesign: !!rawData?.design,
+      isArray: Array.isArray(rawData),
+      hasDataArray: Array.isArray(rawData?.data),
+    });
     
     if (!rawData) {
       console.log('⚠️ Sem dados de design, usando fallback');
       return getFallbackDataGustavoCorretos();
     }
 
-    // 🎯 APLICAR FILTRO DO GUSTAVO PRIMEIRO
+    // ✅ Fonte correta: sempre usar as demandas (orders)
+    // `data.design` no app é uma coleção agregada por cliente, NÃO são as demandas.
     let dadosParaProcessar = [];
-    
-    // Se rawData tem propriedade design (planilha)
-    if (rawData.design && Array.isArray(rawData.design)) {
-      console.log('🔍 Dados brutos de design (planilha):', rawData.design.length);
-      dadosParaProcessar = rawData.design;
-    }
-    // Se rawData é um array direto (dados consolidados)
-    else if (Array.isArray(rawData)) {
-      console.log('🔍 Dados brutos de design (array direto):', rawData.length);
+    if (rawData.originalOrders && Array.isArray(rawData.originalOrders)) {
+      dadosParaProcessar = rawData.originalOrders;
+    } else if (Array.isArray(rawData)) {
       dadosParaProcessar = rawData;
-    }
-    // Se rawData tem outras propriedades possíveis
-    else if (rawData.data && Array.isArray(rawData.data)) {
-      console.log('🔍 Dados brutos de design (rawData.data):', rawData.data.length);
+    } else if (rawData.data && Array.isArray(rawData.data)) {
       dadosParaProcessar = rawData.data;
-    }
-    else {
-      console.log('⚠️ Estrutura de dados não reconhecida, usando fallback');
+    } else {
+      console.log('⚠️ Estrutura de dados não reconhecida (sem originalOrders), usando fallback');
       return getFallbackDataGustavoCorretos();
     }
 
@@ -130,9 +157,8 @@ const DesignProductionChart = ({ data, title, subtitle, filters = { periodo: '20
     const clientesMap = {};
 
     dadosGustavo.forEach(item => {
-      if (!item.cliente || item.cliente === 'Total') return;
-
-      const cliente = item.cliente;
+      const cliente = (item.cliente || item.cliente1 || '').toString().trim() || 'Cliente Não Informado';
+      if (cliente === 'Total') return;
       if (!clientesMap[cliente]) {
         clientesMap[cliente] = {
           nome: cliente,
@@ -155,11 +181,13 @@ const DesignProductionChart = ({ data, title, subtitle, filters = { periodo: '20
 
       // Determinar o ano
       let ano = null;
-      if (item.dataEntrega) {
+      const dataEntrega = item.dataEntregaDate || item.dataEntrega;
+      if (dataEntrega) {
         try {
-          ano = new Date(item.dataEntrega).getFullYear();
+          const dt = (dataEntrega instanceof Date) ? dataEntrega : new Date(dataEntrega);
+          ano = Number.isNaN(dt.getTime()) ? null : dt.getFullYear();
         } catch (error) {
-          console.warn('Data inválida:', item.dataEntrega);
+          console.warn('Data inválida:', dataEntrega);
         }
       }
 
@@ -171,14 +199,15 @@ const DesignProductionChart = ({ data, title, subtitle, filters = { periodo: '20
         
         // Contar por mês (2025)
         try {
-          const mes = new Date(item.dataEntrega).getMonth();
+          const dt = (dataEntrega instanceof Date) ? dataEntrega : new Date(dataEntrega);
+          const mes = dt.getMonth();
           const meses = ['jan2025', 'fev2025', 'mar2025', 'abr2025', 'mai2025', 
                         'jun2025', 'jul2025', 'ago2025', 'set2025', 'out2025', 'nov2025', 'dez2025'];
           if (meses[mes]) {
             clientesMap[cliente][meses[mes]]++;
           }
         } catch (error) {
-          console.warn('Erro ao processar mês:', item.dataEntrega);
+          console.warn('Erro ao processar mês:', dataEntrega);
         }
       }
     });
@@ -719,7 +748,7 @@ const DesignProductionChart = ({ data, title, subtitle, filters = { periodo: '20
                     color: colors.creative,
                     marginBottom: '4px'
                   }}>
-                    {processedData.filter(c => c.total2025 > 0).length}
+                    {clientesAtendidosCount || 0}
                   </div>
                   <div style={{ 
                     fontSize: '13px', 

@@ -2,6 +2,7 @@
   "name": "dashboard-api",
   "version": "1.0.0",
   "private": true,
+  "proxy": "http://localhost:8888",
   "dependencies": {
     "@notionhq/client": "^5.1.0",
     "@testing-library/jest-dom": "^5.16.4",
@@ -29,7 +30,8 @@
     "build": "react-scripts build",
     "server": "PORT=8000 node server/index.js",
     "dev": "netlify dev",
-    "dev:legacy": "concurrently 'npm run start:react' 'npm run server'"
+    "dev:legacy": "concurrently 'npm run start:react' 'npm run server'",
+    "notion:clientes-mes": "node src/scripts/clientesAtendidosPorMesNotion.js"
   },
   "browserslist": {
     "production": [
